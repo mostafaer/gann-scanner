@@ -364,6 +364,58 @@
       exp: closed.length ? R.reduce((a, b) => a + b, 0) / closed.length : 0, pf: gl > 0 ? gp / gl : (gp > 0 ? Infinity : 0), totalR: R.reduce((a, b) => a + b, 0) };
   }
 
+  /* ================= PRICE-TIME MAP =================
+     Square of 9: price P and elapsed time E are "squared" when sqrt(P·k) − sqrt(E) is an even integer
+     (same angle) or an odd one (opposite angle). 1×1: |P − anchor|/u = E.
+     Hot spots = moments when a planet's price line crosses one of these squared curves. */
+  function squaredCurvePrices(ctx, a, j, lo, hi) {
+    const e = elapsedIdx(ctx, a.i, j); if (e <= 0) return [];
+    const k = ctx.sqk, r = Math.sqrt(e), out = [];
+    const n0 = Math.ceil((Math.sqrt(Math.max(lo, 0) * k) - r) / 1), n1 = Math.floor((Math.sqrt(hi * k) - r) / 1);
+    for (let n = n0; n <= n1; n++) { const p = Math.pow(r + n, 2) / k; out.push({ p, kind: n % 2 === 0 ? 'sq9' : 'sq9o', n }); }
+    for (const sgn of [1, -1]) { const p = a.p + sgn * ctx.u * e; if (p > lo && p < hi) out.push({ p, kind: 'bal1', n: sgn }); }
+    return out;
+  }
+  function hotSpots(ctx, a, so, jFrom, jTo) {
+    const out = [], ref = ctx.last.c, lo = ref * (1 - so.range / 100), hi = ref * (1 + so.range / 100);
+    const k = ctx.sqk, cyc = 360 * ctx.pf, offs = ctx.o.harm ? [0, 90, 180, 270] : [0];
+    ctx.extendTo(jTo);
+    const tAt = j => ctx.daily ? ctx.T[j] + DAY / 2 : ctx.T[j];
+    for (const P of ctx.o.planets) {
+      const L = []; for (let j = jFrom - 1; j <= jTo; j++) { const v = G.lon(P, tAt(Math.max(0, j)), ctx.o.helio); if (v == null) { L.length = 0; break; } L.push(v); }
+      if (!L.length) continue;
+      for (const off of offs) {
+        const base0 = G.mod(L[0] + off, 360) * ctx.pf;
+        for (let m = Math.floor((lo - base0) / cyc) - 1; m <= Math.ceil((hi - base0) / cyc) + 1; m++) {
+          let prev = null, vPrev = null, shift = m * cyc;
+          for (let q = 0; q < L.length; q++) {
+            const j = jFrom - 1 + q;
+            let v = G.mod(L[q] + off, 360) * ctx.pf + shift;
+            if (vPrev != null && Math.abs(v - vPrev) > cyc / 2) { shift += v < vPrev ? cyc : -cyc; v += v < vPrev ? cyc : -cyc; }
+            vPrev = v;
+            const e = elapsedIdx(ctx, a.i, j);
+            if (e <= 0 || v <= 0) { prev = null; continue; }
+            const f = Math.sqrt(v * k) - Math.sqrt(e), g = Math.abs(v - a.p) / ctx.u - e;
+            if (prev && j > jFrom - 1) {
+              const cross = [];
+              if (Math.floor(f / 2) !== Math.floor(prev.f / 2)) { const n = 2 * Math.max(Math.floor(f / 2), Math.floor(prev.f / 2)); cross.push({ kind: 'sq9', fr: (n - prev.f) / (f - prev.f) }); }
+              if (Math.floor((f - 1) / 2) !== Math.floor((prev.f - 1) / 2)) { const n = 2 * Math.max(Math.floor((f - 1) / 2), Math.floor((prev.f - 1) / 2)) + 1; cross.push({ kind: 'sq9o', fr: (n - prev.f) / (f - prev.f) }); }
+              if ((g <= 0) !== (prev.g <= 0)) cross.push({ kind: 'bal1', fr: prev.g / (prev.g - g) });
+              for (const c of cross) {
+                const fr = Math.min(1, Math.max(0, c.fr)), t = ctx.T[j - 1] + fr * (ctx.T[j] - ctx.T[j - 1]), p = prev.v + fr * (v - prev.v);
+                if (p < lo || p > hi) continue;
+                out.push({ t, p, P, off, kind: c.kind, j: fr < 0.5 ? j - 1 : j, e: elapsedIdx(ctx, a.i, j - 1) + fr * (e - elapsedIdx(ctx, a.i, j - 1)), a });
+              }
+            }
+            prev = { f, g, v };
+          }
+        }
+      }
+    }
+    for (const h of out) h.w = (h.kind === 'sq9o' ? 1 : 1.5) * (h.off ? 0.75 : 1);
+    return out.sort((x, y) => x.t - y.t);
+  }
+
   let fmtP = p => (Math.abs(p) >= 1000 ? p.toFixed(1) : Math.abs(p) >= 10 ? p.toFixed(2) : p.toFixed(4));
-  root.GannScanner = { signals, simulate, stats, squareState, anchorAt, atrSeries, STRATS, ANGLES, CYCLES, build, elapsedIdx, dateAfter, idxOfT, priceLevels, cluster, timeEvents, windows, backtest, setFmt: f => { fmtP = f; } };
+  root.GannScanner = { hotSpots, squaredCurvePrices, signals, simulate, stats, squareState, anchorAt, atrSeries, STRATS, ANGLES, CYCLES, build, elapsedIdx, dateAfter, idxOfT, priceLevels, cluster, timeEvents, windows, backtest, setFmt: f => { fmtP = f; } };
 })(typeof window !== 'undefined' ? window : globalThis);
