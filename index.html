@@ -1,0 +1,262 @@
+<!doctype html>
+<html lang="ar" dir="rtl">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
+<meta name="description" content="ماسح جان الفلكي: مربع التسعة وزوايا جان ودورات الزمن وخطوط الكواكب وإشارات تربيع السعر بالزمن على بيانات حية.">
+<meta name="theme-color" content="#12161c" media="(prefers-color-scheme: dark)">
+<meta name="theme-color" content="#edf0f3" media="(prefers-color-scheme: light)">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+<meta name="apple-mobile-web-app-title" content="ماسح جان">
+<link rel="manifest" href="manifest.webmanifest">
+<link rel="icon" href="icons/icon.svg" type="image/svg+xml">
+<link rel="apple-touch-icon" href="icons/apple-touch-icon.png">
+<title>ماسح جان الفلكي</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;500&family=IBM+Plex+Sans+Arabic:wght@400;500;600&family=Noto+Kufi+Arabic:wght@600;700&display=swap">
+<link rel="stylesheet" href="css/app.css">
+</head>
+<body>
+<div class="app" dir="rtl" lang="ar">
+  <header class="top">
+    <div class="brand">
+      <svg viewBox="0 0 40 40" aria-hidden="true" fill="none" stroke="currentColor" stroke-width="1.6">
+        <circle cx="20" cy="20" r="17.5" opacity=".45"/>
+        <path d="M20 20h3v-3h-6v6h9v-9h-12v12h15v-15" stroke-linecap="square"/>
+        <path d="M20 2.5v4M20 33.5v4M2.5 20h4M33.5 20h4" opacity=".7"/>
+      </svg>
+      <div><h1>ماسح جان الفلكي</h1><small>السعر · الزمن · الكواكب</small></div>
+    </div>
+    <form class="symbar" id="symForm" autocomplete="off">
+      <label for="symIn" class="sr">الرمز</label>
+      <input id="symIn" type="text" list="symList" spellcheck="false" dir="ltr" aria-label="الرمز">
+      <datalist id="symList"><option value="XAU/USD"><option value="XAG/USD"><option value="BTC/USD"><option value="ETH/USD"><option value="EUR/USD"><option value="GBP/USD"><option value="USD/JPY"><option value="AUD/USD"><option value="SPY"><option value="QQQ"><option value="AAPL"><option value="NVDA"><option value="TSLA"><option value="MSFT"></datalist>
+      <button class="btn" type="submit">تحميل</button>
+      <div class="seg" id="tfSeg" role="group" aria-label="الإطار الزمني"><button type="button" data-tf="15min">15د</button><button type="button" data-tf="1h">1س</button><button type="button" data-tf="4h">4س</button><button type="button" data-tf="1day">يومي</button><button type="button" data-tf="1week">أسبوعي</button></div>
+    </form>
+    <button class="jump" type="button" id="jump">الاستراتيجيات والإعدادات ↓</button>
+    <div class="quote">
+      <span class="sym" id="qSym">XAU/USD</span>
+      <span class="px num" id="qPx">—</span>
+      <span class="chg num" id="qChg">—</span>
+      <span class="asof" id="qAsof"></span>
+    </div>
+    <div class="live offline" id="live" role="status" aria-live="polite"><span class="ld" aria-hidden="true"></span><span class="lt">—</span><button class="mini-btn" id="liveAct" type="button" hidden></button></div>
+  </header>
+
+  <div class="layout">
+    <aside class="rail" aria-label="لوحة التحكم">
+      <section class="panel" id="stratPanel">
+        <div class="panel-h"><h2>الاستراتيجيات</h2><span class="count num" id="stratCount"></span>
+          <button class="mini-btn" id="allOn" type="button">الكل</button><button class="mini-btn" id="allOff" type="button">إيقاف</button></div>
+        <div id="stratList"></div>
+      </section>
+
+      <section class="panel" id="sigSet">
+        <div class="panel-h"><h2>قواعد الصفقة</h2></div>
+        <div class="set">
+          <div class="inline"><span class="lbl">اشتراط تربيع السعر بالزمن</span><button class="sw sm" role="switch" data-so="requireSq" aria-label="اشتراط التربيع"></button></div>
+          <div class="fld"><span class="lbl">طرق التربيع المقبولة</span>
+            <div class="inline"><span class="lbl">توازن 1×1 (الزمن = حركة السعر)</span><button class="sw sm" role="switch" data-so="mBal" aria-label="توازن 1×1"></button></div>
+            <div class="inline"><span class="lbl">زاوية مربع ٩ للسعر = للزمن</span><button class="sw sm" role="switch" data-so="mSq9" aria-label="زاوية مربع 9"></button></div>
+            <div class="inline"><span class="lbl">دورة أو مربع زمني من المحور</span><button class="sw sm" role="switch" data-so="mCyc" aria-label="دورة زمنية"></button></div>
+            <div class="inline"><span class="lbl">سعر المحور كدرجات = الزمن</span><button class="sw sm" role="switch" data-so="mPdeg" aria-label="السعر كدرجات"></button></div>
+          </div>
+          <div class="two">
+            <div class="fld"><label for="soTouch">سماحية اللمس %</label><input type="number" id="soTouch" step="0.01" min="0.02" max="1"></div>
+            <div class="fld"><label for="soDeg">سماحية الزاوية °</label><input type="number" id="soDeg" step="1" min="1" max="20"></div>
+          </div>
+          <div class="two">
+            <div class="fld"><label for="soBal">سماحية 1×1</label><input type="number" id="soBal" step="0.01" min="0.02" max="0.5"></div>
+            <div class="fld"><label for="soGrade">أدنى درجة على الرسم</label><select id="soGrade"><option value="A">A فقط</option><option value="B">B وأعلى</option><option value="C">الكل</option></select></div>
+          </div>
+          <div class="two">
+            <div class="fld"><label for="soStop">الوقف (× ATR)</label><input type="number" id="soStop" step="0.1" min="0" max="3"></div>
+            <div class="fld"><label for="soRR">أدنى عائد/مخاطرة</label><input type="number" id="soRR" step="0.1" min="0.5" max="5"></div>
+          </div>
+          <div class="fld"><label for="soHold">أقصى مدة للصفقة (شموع)</label><input type="number" id="soHold" step="1" min="3" max="200"></div>
+          <p class="hint" style="margin:0;font-size:.76rem;color:var(--faint);line-height:1.7">A = لمس + طريقتا تربيع أو أكثر · B = لمس + طريقة واحدة · C = لمس فقط.</p>
+        </div>
+      </section>
+
+      <section class="panel">
+        <div class="panel-h"><h2>الكواكب</h2><span class="count" id="geoHelioLbl"></span></div>
+        <div class="chips" id="planetChips"></div>
+      </section>
+
+      <details class="panel" open>
+        <summary class="panel-h"><h2>الإعدادات</h2></summary>
+        <div class="set">
+          <div class="fld"><label for="anchorSel">المحور (القمة أو القاع المرجعي)</label>
+            <select id="anchorSel"></select>
+            <span class="hint">أو اضغط على أي مثلث قمة/قاع في الرسم</span></div>
+          <div class="fld"><span class="lbl">مصدر الإسقاطات</span>
+            <div class="seg" data-key="anchorMode"><button type="button" data-v="main">المحور فقط</button><button type="button" data-v="all">آخر 8 محاور</button></div></div>
+          <div class="fld"><label for="pivK">حساسية القمم والقيعان: <span class="num" id="pivKv"></span> شموع</label>
+            <input type="range" id="pivK" min="3" max="15" step="1"></div>
+          <div class="fld"><span class="lbl">وحدة الزمن</span>
+            <div class="seg" data-key="timeMode"><button type="button" data-v="cal">أيام تقويمية</button><button type="button" data-v="bar">شموع تداول</button></div></div>
+          <div class="two">
+            <div class="fld"><label for="unit">وحدة السعر (1×1)</label><input type="number" id="unit" min="0" step="any" placeholder="تلقائي"></div>
+            <div class="fld"><label for="pf">معامل الدرجة→سعر</label><input type="number" id="pf" min="0" step="any" placeholder="تلقائي"></div>
+          </div>
+          <div class="two">
+            <div class="fld"><label for="sqk">مضاعف مربع ٩</label><input type="number" id="sqk" min="0" step="any" placeholder="تلقائي"></div>
+            <div class="fld"><label for="tol">سماحية التلاقي %</label><input type="number" id="tol" min="0.05" max="2" step="0.05"></div>
+          </div>
+          <div class="fld"><span class="lbl">مركز الرصد</span>
+            <div class="seg" data-key="helio"><button type="button" data-v="0">أرضي (Geo)</button><button type="button" data-v="1">شمسي (Helio)</button></div></div>
+          <div class="inline"><span class="lbl">توافقيات الكواكب ±90° و180°</span><button class="sw sm" role="switch" id="harm" aria-label="التوافقيات"></button></div>
+          <div class="two">
+            <div class="fld"><label for="horizon">أفق المسح (يوم)</label>
+              <select id="horizon"><option value="30">30</option><option value="60">60</option><option value="90">90</option><option value="180">180</option><option value="365">365</option></select></div>
+            <div class="fld"><label for="win">نافذة التلاقي (± يوم)</label>
+              <select id="win"><option value="0">0</option><option value="1">1</option><option value="2">2</option><option value="3">3</option></select></div>
+          </div>
+          <p class="hint" id="unitsInfo" style="margin:0;font-size:.76rem;color:var(--faint);line-height:1.7"></p>
+        </div>
+      </details>
+    </aside>
+
+    <main class="main">
+      <div class="tiles">
+        <div class="tile"><div class="k">آخر إغلاق</div><div class="v num" id="tLast">—</div><div class="s" id="tLastS"></div></div>
+        <div class="tile res"><div class="k">أقرب مقاومة متلاقية</div><div class="v num" id="tRes">—</div><div class="s" id="tResS"></div></div>
+        <div class="tile sup"><div class="k">أقرب دعم متلاقٍ</div><div class="v num" id="tSup">—</div><div class="s" id="tSupS"></div></div>
+        <div class="tile tm"><div class="k">أقوى نافذة زمنية</div><div class="v" id="tWin">—</div><div class="s" id="tWinS"></div></div>
+      </div>
+
+      <section class="chart-card" id="chartCard">
+        <div class="chart-bar">
+          <div class="seg" id="rangeSeg"><button type="button" data-r="60">60</button><button type="button" data-r="180">180</button><button type="button" data-r="365">365</button><button type="button" data-r="0">الكل</button></div>
+          <div class="tools" id="toolbar" role="toolbar" aria-label="أدوات الرسم">
+            <button class="ico" type="button" data-tool="line" aria-pressed="false" title="خط اتجاه" aria-label="خط اتجاه"><svg viewBox="0 0 20 20" aria-hidden="true"><path d="M4 16L16 4" stroke="currentColor" stroke-width="1.6"/><circle cx="4" cy="16" r="1.8" fill="currentColor"/><circle cx="16" cy="4" r="1.8" fill="currentColor"/></svg></button>
+            <button class="ico" type="button" data-tool="ray" aria-pressed="false" title="شعاع ممتد" aria-label="شعاع"><svg viewBox="0 0 20 20" aria-hidden="true"><path d="M4 16L19 3" stroke="currentColor" stroke-width="1.6"/><circle cx="4" cy="16" r="1.8" fill="currentColor"/></svg></button>
+            <button class="ico" type="button" data-tool="hline" aria-pressed="false" title="خط أفقي" aria-label="خط أفقي"><svg viewBox="0 0 20 20" aria-hidden="true"><path d="M2 10h16" stroke="currentColor" stroke-width="1.6"/></svg></button>
+            <button class="ico" type="button" data-tool="fan" aria-pressed="false" title="مروحة جان من نقطة" aria-label="مروحة جان"><svg viewBox="0 0 20 20" aria-hidden="true"><path d="M3 17L17 3M3 17L17 10M3 17L10 3M3 17h14" stroke="currentColor" stroke-width="1.3" fill="none"/></svg></button>
+            <button class="ico" type="button" id="toolUndo" title="تراجع (Ctrl+Z)" aria-label="تراجع عن آخر رسم"><svg viewBox="0 0 20 20" aria-hidden="true"><path d="M7 5L3 9l4 4M3 9h9a5 5 0 0 1 0 10h-2" fill="none" stroke="currentColor" stroke-width="1.6"/></svg></button>
+            <button class="mini-btn" type="button" id="toolClear">مسح</button>
+          </div>
+          <span class="tool-hint" id="toolHint" hidden></span>
+          <span class="sp"></span>
+          <button class="ico" id="btnAlert" type="button" aria-pressed="false" title="تنبيه صوتي عند ظهور إشارة" aria-label="تنبيه صوتي"><svg viewBox="0 0 20 20" aria-hidden="true"><path d="M5 14V9a5 5 0 0 1 10 0v5l1.5 2h-13zM8.5 18h3" fill="none" stroke="currentColor" stroke-width="1.5"/></svg></button>
+          <button class="ico" id="btnFit" type="button" aria-label="ملاءمة الرسم" title="ملاءمة الرسم"><svg viewBox="0 0 20 20" aria-hidden="true"><path d="M3 7V3h4M17 7V3h-4M3 13v4h4M17 13v4h-4" fill="none" stroke="currentColor" stroke-width="1.6"/></svg></button>
+          <button class="ico txt" id="btnLog" type="button" aria-pressed="false" title="مقياس لوغاريتمي">log</button>
+          <button class="ico" id="btnMag" type="button" aria-pressed="false" aria-label="مغناطيس المؤشر" title="تثبيت المؤشر على الشموع"><svg viewBox="0 0 20 20" aria-hidden="true"><path d="M5 3v7a5 5 0 0 0 10 0V3h-3v7a2 2 0 0 1-4 0V3z" fill="none" stroke="currentColor" stroke-width="1.5"/></svg></button>
+          <button class="ico" id="btnFull" type="button" aria-pressed="false" aria-label="ملء الشاشة" title="ملء الشاشة"><svg viewBox="0 0 20 20" aria-hidden="true"><path d="M3 8V3h5M12 3h5v5M17 12v5h-5M8 17H3v-5" fill="none" stroke="currentColor" stroke-width="1.6"/></svg></button>
+        </div>
+        <div class="chart-wrap" id="chartWrap">
+          <canvas id="ovl" aria-hidden="true"></canvas>
+          <div class="ohlc" id="ohlc"></div>
+          <div class="hover" id="hover" hidden></div>
+        </div>
+        <div class="legend" id="legend"></div>
+      </section>
+
+      <div>
+        <div class="tabs" role="tablist" id="tabs">
+          <button role="tab" aria-selected="true" data-t="sig" type="button">الإشارات</button>
+          <button role="tab" aria-selected="false" data-t="sum" type="button">الملخص</button>
+          <button role="tab" aria-selected="false" data-t="scan" type="button">الماسح المتعدد</button>
+          <button role="tab" aria-selected="false" data-t="pt" type="button">السعر = الزمن</button>
+          <button role="tab" aria-selected="false" data-t="astro" type="button">الفلك</button>
+          <button role="tab" aria-selected="false" data-t="sq9" type="button">حاسبة مربع ٩</button>
+          <button role="tab" aria-selected="false" data-t="bt" type="button">اختبار تاريخي</button>
+          <button role="tab" aria-selected="false" data-t="data" type="button">البيانات</button>
+        </div>
+
+        <div class="pane" data-p="sig">
+          <div class="sig-now idle" id="sigNow"></div>
+          <div class="cols" style="margin-top:16px">
+            <div class="card"><div class="card-h"><h3>متى تصبح الصفقة جاهزة</h3><span class="sub">أقرب خطوط الكواكب وتاريخ تربيعها مع الزمن</span></div><div class="scroll" id="sigWatch"></div>
+              <div class="note">الصفقة عند جان هنا = <b>السعر يلمس رقم الكوكب</b> (خط الكوكب) <b>في نفس الوقت الذي يتربع فيه السعر مع الزمن</b> من المحور. الجدول يقول لك أي خط سيكون «جاهزًا» ومتى، فإذا وصل السعر إليه في ذلك اليوم تظهر الإشارة.</div></div>
+            <div style="display:flex;flex-direction:column;gap:16px;min-width:0"><div class="card"><div class="card-h"><h3>سجل التنبيهات</h3><span class="sub">فعّل الجرس فوق الرسم</span></div><ul class="alog" id="alertLog"></ul></div>
+            <div class="card"><div class="card-h"><h3>أداء القواعد تاريخيًا</h3><span class="sub" id="sigSub"></span></div><div class="stats" id="sigStats"></div>
+              <div class="note">كل إشارة تُحاكى للأمام: الوقف أولًا إذا لُمس الوقف والهدف في نفس الشمعة (افتراض متحفظ). القيمة بالـ R = الربح مقسومًا على المخاطرة. قيمة موجبة ثابتة على مئات الصفقات هي ما يهم، وليس صفقة واحدة ناجحة.</div></div></div>
+          </div>
+          <div class="card" style="margin-top:16px"><div class="card-h"><h3>سجل الإشارات</h3><span class="sub">الأحدث أولًا · آخر 60</span></div>
+            <div class="scroll"><table><thead><tr><th>التاريخ</th><th>الاتجاه</th><th>خط الكوكب</th><th>التربيع</th><th>الدخول</th><th>الوقف</th><th>الهدف</th><th>النتيجة</th></tr></thead><tbody id="sigBody"></tbody></table></div></div>
+        </div>
+
+        <div class="pane" data-p="scan" hidden>
+          <div class="card">
+            <div class="card-h"><h3>مسح عدة أدوات بنفس القواعد</h3><span class="sub">نفس الإطار الزمني والكواكب وقواعد الصفقة</span></div>
+            <div class="calc"><div class="fld" style="flex:3"><label for="msList">الرموز (افصل بفاصلة)</label><input type="text" id="msList" dir="ltr" spellcheck="false"></div><button class="btn" id="msRun" type="button">ابدأ المسح</button></div>
+            <div class="scroll"><table><thead><tr><th>الرمز</th><th>السعر</th><th>إشارة آخر 3 شموع</th><th>أقرب خط كوكب</th><th>تربيع السعر بالزمن عند الخط</th><th></th></tr></thead><tbody id="msBody"></tbody></table></div>
+          </div>
+        </div>
+
+        <div class="pane" data-p="sum" hidden>
+          <div class="cols">
+            <div class="card"><div class="card-h"><h3>مناطق السعر المتلاقية</h3><span class="sub" id="zoneSub"></span></div><div class="scroll"><table><thead><tr><th>السعر</th><th>المسافة</th><th>القوة</th><th>المصادر</th></tr></thead><tbody id="zoneBody"></tbody></table></div></div>
+            <div class="card"><div class="card-h"><h3>نوافذ الزمن القادمة</h3><span class="sub" id="winSub"></span></div><div id="winList"></div></div>
+          </div>
+          <div class="card" style="margin-top:16px"><div class="card-h"><h3>قواعد جان على الوضع الحالي</h3></div><div class="rules" id="rules"></div></div>
+        </div>
+
+        <div class="pane" data-p="pt" hidden>
+          <div class="cols">
+            <div class="card"><div class="card-h"><h3>ساعة التربيع</h3><span class="sub">زاوية السعر وزاوية الزمن على مربع التسعة</span></div><div class="pt" id="ptBox"></div></div>
+            <div class="card"><div class="card-h"><h3>تواريخ تربيع السعر بالزمن</h3><span class="sub">من المحور المختار</span></div><div id="ptList"></div></div>
+          </div>
+          <div class="card" style="margin-top:16px"><div class="note">جان كتب أن السعر والزمن إذا تساويا تغيّر الاتجاه. يُقرأ ذلك بثلاث طرق هنا: <b>(1)</b> عدد وحدات الزمن المنقضي يساوي عدد وحدات السعر المقطوعة (خط 1×1)، <b>(2)</b> رقم الزمن يقع على نفس زاوية رقم السعر في مربع التسعة، <b>(3)</b> سعر المحور يُقرأ كدرجات على دائرة 360 ويُعدّ أيامًا. وحدة السعر تحدد كل شيء، لذلك غيّرها من الإعدادات وراقب كيف تتحرك التواريخ.</div></div>
+        </div>
+
+        <div class="pane" data-p="astro" hidden>
+          <div class="card"><div class="card-h"><h3>مواقع الكواكب الآن وخطوطها السعرية</h3><span class="sub" id="astroSub"></span></div><div class="scroll"><table><thead><tr><th>الكوكب</th><th>الطول</th><th>البرج</th><th>السرعة/يوم</th><th>الحالة</th><th>أقرب خط للسعر</th></tr></thead><tbody id="plBody"></tbody></table></div></div>
+          <div class="card" style="margin-top:16px"><div class="card-h"><h3>الأحداث الفلكية في أفق المسح</h3><span class="sub" id="evSub"></span></div><div class="scroll"><table><thead><tr><th>التاريخ (UTC)</th><th>الحدث</th><th>النوع</th><th>الوزن</th></tr></thead><tbody id="evBody"></tbody></table></div></div>
+        </div>
+
+        <div class="pane" data-p="sq9" hidden>
+          <div class="card">
+            <div class="card-h"><h3>حاسبة مربع التسعة</h3><span class="sub">المستوى = (√الرقم ± الدرجة ÷ 180)²</span></div>
+            <div class="calc"><div class="fld"><label for="sqIn">الرقم (سعر أو عدد أيام)</label><input type="number" id="sqIn" step="any"></div><div class="fld"><label for="sqMul">المضاعف</label><input type="number" id="sqMul" step="any" value="1"></div></div>
+            <div class="note" id="sqDeg" style="padding-top:0"></div>
+            <div class="scroll"><table><thead><tr><th>الزاوية</th><th>صعودًا</th><th>هبوطًا</th><th>ملاحظة</th></tr></thead><tbody id="sqBody"></tbody></table></div>
+          </div>
+        </div>
+
+        <div class="pane" data-p="bt" hidden>
+          <div class="card"><div class="card-h"><h3>هل تصيب كل استراتيجية القمم والقيعان أكثر من الصدفة؟</h3><span class="sub" id="btSub"></span></div>
+            <div class="scroll"><table><thead><tr><th>الاستراتيجية</th><th>عدد الاختبارات</th><th>نسبة الإصابة</th><th>نسبة الصدفة</th><th>احتمال الصدفة (p)</th><th>معامل التفوق</th><th>الحكم</th></tr></thead><tbody id="btBody"></tbody></table></div>
+            <div class="note">لكل قمة أو قاع تاريخي، يحسب الماسح المستويات والتواريخ من القمم والقيعان التي سبقته فقط (بدون نظر للمستقبل). <b>نسبة الإصابة</b>: كم مرة وقع المحور على مستوى أو داخل نافذة زمنية. <b>نسبة الصدفة</b>: كم مرة تقع شموع عادية حوله على نفس المستويات، أو نسبة الأيام التي تغطيها النوافذ. معامل تفوق قريب من 1 يعني أن الأداة لا تفرّق المحاور عن الأيام العادية في هذه البيانات. <b>احتمال الصدفة p</b>: احتمال الحصول على هذا العدد من الإصابات أو أكثر لو كانت الأداة عشوائية؛ «أفضل من الصدفة» يُمنح فقط عندما يكون أقل من 0.05. مع أقل من 30 اختبارًا تبقى النتيجة مؤشرًا لا دليلًا.</div>
+          </div>
+        </div>
+
+        <div class="pane" data-p="data" hidden>
+          <div class="card">
+            <div class="card-h"><h3>بيانات السوق</h3><span class="sub" id="dataSub"></span></div>
+            <div class="keybox" id="keyBox">
+              <div class="fld"><label for="keyIn">مفتاح Twelve Data (للذهب والعملات والأسهم)</label>
+                <div class="keyrow"><input type="password" id="keyIn" dir="ltr" autocomplete="off" spellcheck="false" placeholder="الصق المفتاح هنا"><button class="btn" id="keySave" type="button">حفظ وتجربة</button><button class="btn ghost" id="keyDel" type="button">حذف</button></div>
+                <span class="hint" id="keyMsg">مفتاح مجاني من twelvedata.com (800 طلب/يوم). يُحفظ في متصفح هذا الجهاز فقط ولا يُرسل لأي مكان غير Twelve Data. العملات الرقمية (BTC، ETH…) لا تحتاج مفتاحًا وتأتي لحظيًا من Binance.</span></div>
+            </div>
+            <div class="set" style="padding-top:6px">
+              <div class="two"><div class="fld"><label for="symName">اسم الأداة</label><input type="text" id="symName" maxlength="24"></div>
+              <div class="fld"><label for="fileIn">ملف CSV</label><input type="file" id="fileIn" accept=".csv,.txt,text/csv"></div></div>
+              <div class="fld"><label for="csvIn">أو الصق البيانات اليومية: date, open, high, low, close</label><textarea id="csvIn" spellcheck="false" placeholder="date,open,high,low,close&#10;2026-11-02,3875.3,3970.0,3866.0,3944.3"></textarea>
+                <span class="hint">يقبل الفاصلة أو الفاصلة المنقوطة أو Tab، والتاريخ بصيغة YYYY-MM-DD أو DD/MM/YYYY. يكفي 40 شمعة، والأفضل سنة على الأقل.</span></div>
+              <div style="display:flex;gap:10px;flex-wrap:wrap"><button class="btn" id="applyData" type="button">تحليل البيانات</button><button class="btn ghost" id="resetData" type="button">استعادة بيانات الذهب</button></div>
+            </div>
+          </div>
+        </div>
+      </div>
+    </main>
+  </div>
+
+  <p class="foot">أداة بحث وتعليم وليست توصية مالية. أساليب جان والتنجيم المالي لا يوجد عليها دليل علمي منشور على قدرتها التنبؤية، ولهذا يعرض الماسح تبويب «اختبار تاريخي» ليقيس كل استراتيجية على بياناتك بدل الوثوق بها. مواقع الكواكب محسوبة بمكتبة Astronomy Engine (دقة دقيقة قوسية تقريبًا)، والبيانات الحية من Twelve Data عبر حسابك المربوط في claude.ai، ومع غيابها تعرض الصفحة أسعار الذهب اليومية المرفقة حتى 9 نوفمبر 2026. الرسم البياني مبني بمكتبة Lightweight Charts من TradingView.</p>
+</div>
+<div class="toast" id="toast" role="status" aria-live="polite"></div>
+
+<script src="vendor/astronomy-engine-2.1.19.min.js" defer></script>
+<script src="vendor/lightweight-charts-4.2.3.standalone.production.js" defer></script>
+<script src="js/core/engine.js" defer></script>
+<script src="js/core/scanner.js" defer></script>
+<script src="js/data/providers.js" defer></script>
+<script src="js/data/sample-xau.js" defer></script>
+<script src="js/app.js" defer></script>
+<script src="js/pwa.js" defer></script>
+</body>
+</html>

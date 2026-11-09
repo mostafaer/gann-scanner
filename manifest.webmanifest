@@ -1,0 +1,20 @@
+{
+  "name": "ماسح جان الفلكي",
+  "short_name": "ماسح جان",
+  "description": "مربع التسعة وزوايا جان ودورات الزمن وخطوط الكواكب وإشارات تربيع السعر بالزمن على بيانات حية.",
+  "lang": "ar",
+  "dir": "rtl",
+  "start_url": "./",
+  "scope": "./",
+  "display": "standalone",
+  "orientation": "any",
+  "background_color": "#12161c",
+  "theme_color": "#12161c",
+  "categories": ["finance"],
+  "icons": [
+    { "src": "icons/icon-192.png", "sizes": "192x192", "type": "image/png" },
+    { "src": "icons/icon-512.png", "sizes": "512x512", "type": "image/png" },
+    { "src": "icons/icon-maskable-512.png", "sizes": "512x512", "type": "image/png", "purpose": "maskable" },
+    { "src": "icons/icon.svg", "sizes": "any", "type": "image/svg+xml" }
+  ]
+}
