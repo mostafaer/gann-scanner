@@ -37,11 +37,12 @@
       <div class="seg" id="tfSeg" role="group" aria-label="الإطار الزمني"><button type="button" data-tf="15min">15د</button><button type="button" data-tf="1h">1س</button><button type="button" data-tf="4h">4س</button><button type="button" data-tf="1day">يومي</button><button type="button" data-tf="1week">أسبوعي</button></div>
     </form>
     <button class="jump" type="button" id="jump">الاستراتيجيات والإعدادات ↓</button>
+    <button class="ico theme-btn" id="themeBtn" type="button" title="المظهر: تلقائي / داكن / فاتح" aria-label="المظهر"><svg viewBox="0 0 20 20" aria-hidden="true"><circle cx="10" cy="10" r="6.5" fill="none" stroke="currentColor" stroke-width="1.5"/><path d="M10 3.5a6.5 6.5 0 0 1 0 13z" fill="currentColor"/></svg></button>
     <div class="quote">
       <span class="sym" id="qSym">XAU/USD</span>
       <span class="px num" id="qPx">—</span>
       <span class="chg num" id="qChg">—</span>
-      <span class="asof" id="qAsof"></span>
+      <span class="asof" id="qAsof"></span><span class="badge" id="replayBadge" hidden></span>
     </div>
     <div class="live offline" id="live" role="status" aria-live="polite"><span class="ld" aria-hidden="true"></span><span class="lt">—</span><button class="mini-btn" id="liveAct" type="button" hidden></button></div>
   </header>
@@ -70,7 +71,7 @@
           </div>
           <div class="two">
             <div class="fld"><label for="soBal">سماحية 1×1</label><input type="number" id="soBal" step="0.01" min="0.02" max="0.5"></div>
-            <div class="fld"><label for="soGrade">أدنى درجة على الرسم</label><select id="soGrade"><option value="A">A فقط</option><option value="B">B وأعلى</option><option value="C">الكل</option></select></div>
+            <div class="fld"><label for="soGrade">أدنى درجة للإشارة</label><select id="soGrade"><option value="A">A فقط</option><option value="B">B وأعلى</option><option value="C">الكل</option></select></div>
           </div>
           <div class="two">
             <div class="fld"><label for="soStop">الوقف (× ATR)</label><input type="number" id="soStop" step="0.1" min="0" max="3"></div>
@@ -115,6 +116,7 @@
             <div class="fld"><label for="win">نافذة التلاقي (± يوم)</label>
               <select id="win"><option value="0">0</option><option value="1">1</option><option value="2">2</option><option value="3">3</option></select></div>
           </div>
+          <div class="chips-row" id="unitPresets" aria-label="قيم جاهزة لوحدة السعر"></div>
           <p class="hint" id="unitsInfo" style="margin:0;font-size:.76rem;color:var(--faint);line-height:1.7"></p>
         </div>
       </details>
@@ -141,11 +143,21 @@
           </div>
           <span class="tool-hint" id="toolHint" hidden></span>
           <span class="sp"></span>
+          <button class="ico" id="btnReplay" type="button" aria-pressed="false" title="إعادة تشغيل التاريخ" aria-label="إعادة تشغيل التاريخ"><svg viewBox="0 0 20 20" aria-hidden="true"><path d="M4 4v5h5" fill="none" stroke="currentColor" stroke-width="1.6"/><path d="M4.5 9A6 6 0 1 1 6 14" fill="none" stroke="currentColor" stroke-width="1.6"/><path d="M9 7.5v5l3.5-2.5z" fill="currentColor"/></svg></button>
+          <div class="pop-wrap"><button class="mini-btn layers-btn" id="btnLayers" type="button" aria-expanded="false" aria-controls="layersPop">الطبقات</button><div class="pop" id="layersPop" hidden></div></div>
           <button class="ico" id="btnAlert" type="button" aria-pressed="false" title="تنبيه صوتي عند ظهور إشارة" aria-label="تنبيه صوتي"><svg viewBox="0 0 20 20" aria-hidden="true"><path d="M5 14V9a5 5 0 0 1 10 0v5l1.5 2h-13zM8.5 18h3" fill="none" stroke="currentColor" stroke-width="1.5"/></svg></button>
           <button class="ico" id="btnFit" type="button" aria-label="ملاءمة الرسم" title="ملاءمة الرسم"><svg viewBox="0 0 20 20" aria-hidden="true"><path d="M3 7V3h4M17 7V3h-4M3 13v4h4M17 13v4h-4" fill="none" stroke="currentColor" stroke-width="1.6"/></svg></button>
           <button class="ico txt" id="btnLog" type="button" aria-pressed="false" title="مقياس لوغاريتمي">log</button>
           <button class="ico" id="btnMag" type="button" aria-pressed="false" aria-label="مغناطيس المؤشر" title="تثبيت المؤشر على الشموع"><svg viewBox="0 0 20 20" aria-hidden="true"><path d="M5 3v7a5 5 0 0 0 10 0V3h-3v7a2 2 0 0 1-4 0V3z" fill="none" stroke="currentColor" stroke-width="1.5"/></svg></button>
           <button class="ico" id="btnFull" type="button" aria-pressed="false" aria-label="ملء الشاشة" title="ملء الشاشة"><svg viewBox="0 0 20 20" aria-hidden="true"><path d="M3 8V3h5M12 3h5v5M17 12v5h-5M8 17H3v-5" fill="none" stroke="currentColor" stroke-width="1.6"/></svg></button>
+        </div>
+        <div class="replay" id="replay" hidden>
+          <button class="ico" type="button" data-step="-10" aria-label="رجوع 10 شموع">«</button><button class="ico" type="button" data-step="-1" aria-label="رجوع شمعة">‹</button>
+          <button class="ico play" type="button" id="rpPlay" aria-label="تشغيل/إيقاف">▶</button>
+          <button class="ico" type="button" data-step="1" aria-label="تقدم شمعة">›</button><button class="ico" type="button" data-step="10" aria-label="تقدم 10 شموع">»</button>
+          <input type="range" id="rpSlider" aria-label="نقطة الإعادة"><span class="num rp-date" id="rpDate"></span>
+          <span class="inline rp-ghost"><span class="lbl">أظهر ما حدث بعدها</span><button class="sw sm" role="switch" id="rpGhost" aria-checked="true" aria-label="أظهر ما حدث بعدها"></button></span>
+          <button class="mini-btn" type="button" id="rpExit">خروج</button>
         </div>
         <div class="chart-wrap" id="chartWrap">
           <canvas id="ovl" aria-hidden="true"></canvas>
@@ -169,6 +181,9 @@
 
         <div class="pane" data-p="sig">
           <div class="sig-now idle" id="sigNow"></div>
+          <div class="card" style="margin-top:16px"><div class="card-h"><h3>نقاط الحسم القادمة: السعر = الزمن = الكوكب</h3><span class="sub" id="hotSub"></span></div>
+            <div class="scroll"><table><thead><tr><th>الوقت (UTC)</th><th>السعر</th><th>الكوكب</th><th>التربيع</th><th>المسافة الآن</th><th>القوة</th></tr></thead><tbody id="hotBody"></tbody></table></div>
+            <div class="note">كل نقطة هنا = لحظة يقطع فيها خط كوكب منحنى سعر متربع مع الزمن من المحور (جذر السعر − جذر الزمن = عدد صحيح على مربع التسعة، أو حركة السعر = الزمن على 1×1). على الرسم تظهر كمعيّنات ◆: الممتلئة قادمة، والباهتة سابقة لتقارن رد فعل السعر عندها. القوة تزيد عندما يتلاقى أكثر من كوكب في نفس النقطة أو تقع داخل نافذة زمنية.</div></div>
           <div class="cols" style="margin-top:16px">
             <div class="card"><div class="card-h"><h3>متى تصبح الصفقة جاهزة</h3><span class="sub">أقرب خطوط الكواكب وتاريخ تربيعها مع الزمن</span></div><div class="scroll" id="sigWatch"></div>
               <div class="note">الصفقة عند جان هنا = <b>السعر يلمس رقم الكوكب</b> (خط الكوكب) <b>في نفس الوقت الذي يتربع فيه السعر مع الزمن</b> من المحور. الجدول يقول لك أي خط سيكون «جاهزًا» ومتى، فإذا وصل السعر إليه في ذلك اليوم تظهر الإشارة.</div></div>

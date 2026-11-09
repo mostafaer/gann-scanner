@@ -43,6 +43,7 @@
     helio: false, harm: false, horizon: 90, win: 1, sym: 'XAU/USD', csv: null, open: {},
     tf: '1day', source: 'sample', anchorLocked: false,
     watchlist: 'XAU/USD, XAG/USD, BTC/USD, ETH/USD, EUR/USD, GBP/USD, USD/JPY, SPY, QQQ, NVDA',
+    layers: { levels: false }, theme: 'auto',
     so: { touchPct: 0.12, requireSq: true, mBal: true, mSq9: true, mCyc: true, mPdeg: false, balTol: 0.12, degTol: 6, win: 1, cooldown: 5, stopAtr: 0.3, minRR: 1.5, hold: 30, minGrade: 'A' }
   };
   const KEY = 'gann-scanner.v2';
@@ -63,7 +64,7 @@
   const dFmtS = new Intl.DateTimeFormat('ar-EG-u-nu-latn', { day: 'numeric', month: 'short', timeZone: 'UTC' });
   const wFmt = new Intl.DateTimeFormat('ar-EG-u-nu-latn', { weekday: 'long', timeZone: 'UTC' });
   const tFmt = new Intl.DateTimeFormat('ar-EG-u-nu-latn', { hour: '2-digit', minute: '2-digit', hour12: false, timeZone: 'UTC' });
-  const fd = t => (CTX && !CTX.daily) ? `${dFmtS.format(new Date(t))} ${tFmt.format(new Date(t))}` : dFmt.format(new Date(t)), fds = t => dFmtS.format(new Date(t));
+  const fd = t => (CTX && !CTX.daily) ? `${dFmtS.format(new Date(t))} \u2066${tFmt.format(new Date(t))}\u2069` : dFmt.format(new Date(t)), fds = t => dFmtS.format(new Date(t));
   const fdt = t => { const d = new Date(t); return `${d.toISOString().slice(0, 10)} ${d.toISOString().slice(11, 16)}`; };
   const pct = x => (x >= 0 ? '+' : '−') + Math.abs(x * 100).toFixed(2) + '%';
   const css = n => getComputedStyle(document.documentElement).getPropertyValue(n).trim();
@@ -189,9 +190,9 @@
     try { A = analyze(); } catch (err) { console.error(err); toast('تعذّر الحساب: ' + err.message); return; }
     if (!A) { toast('لا توجد قمم أو قيعان كافية بهذه الحساسية. خفّض الرقم.'); return; }
     CTX = A.c; save();
-    try { computeSignals(); } catch (err) { console.error(err); SIG.list = []; SIG.live = null; SIG.watch = []; SIG.stat = { all: SC.stats([]), A: SC.stats([]), B: SC.stats([]), C: SC.stats([]) }; }
+    try { computeSignals(); computeHot(); } catch (err) { console.error(err); SIG.list = []; SIG.all = []; SIG.hot = []; SIG.hotTop = []; SIG.live = null; SIG.watch = []; SIG.stat = { all: SC.stats([]), A: SC.stats([]), B: SC.stats([]), C: SC.stats([]) }; }
     renderHeader(); renderAnchorSel(); renderTiles(); renderSummary();
-    renderSignals(); renderPT(); renderAstro(); renderSq9(); renderData();
+    renderSignals(); renderHot(); renderUnitPresets(); renderPT(); renderAstro(); renderSq9(); renderData();
     btDirty = true; if (curTab === 'bt') renderBT();
     updateChart(keepView);
     renderOHLC(CTX.n - 1);
@@ -417,6 +418,8 @@
       handleScroll: { mouseWheel: true, pressedMouseMove: true, horzTouchDrag: true, vertTouchDrag: false },
     }, chartTheme()));
     CHT.candle = CHT.chart.addCandlestickSeries({ priceLineVisible: true, lastValueVisible: true });
+    CHT.hist = CHT.chart.addHistogramSeries({ priceScaleId: 'tc', priceLineVisible: false, lastValueVisible: false, base: 0 });
+    CHT.chart.priceScale('tc').applyOptions({ scaleMargins: { top: 0.86, bottom: 0 }, visible: false });
     styleCandles();
     CHT.chart.timeScale().subscribeVisibleLogicalRangeChange(() => requestAnimationFrame(drawOverlay));
     CHT.chart.subscribeCrosshairMove(onCrosshair);
@@ -472,7 +475,7 @@
     const ref = c.last.c, lo = Math.max(c.lo * 0.97, ref * 0.85), hi = Math.min(c.hi * 1.03, ref * 1.15);
 
     // planetary lines (move with each planet's longitude)
-    if (S.on.planet) {
+    if (S.on.planet && lay('planets')) {
       const offs = S.harm ? [0, 90, 180, 270] : [0], cyc = 360 * c.pf;
       for (const P of S.planets) {
         const L = new Float64Array(N); let ok = true;
@@ -496,7 +499,7 @@
       }
     }
     // Gann fan from the anchor
-    if (S.on.angles) {
+    if (S.on.angles && lay('fan')) {
       const m = c.main;
       for (const Ag of SC.ANGLES) {
         const pts = [];
@@ -508,23 +511,26 @@
     if (S.on.swing) line({ color: alpha(css('--c-trend'), 0.75), lineWidth: 1 }).setData(A.swing.pts.map(p => ({ time: sec(c.bars[p.i].t), value: p.p })).filter((p, k, arr) => !k || p.time > arr[k - 1].time));
 
     // static levels from the anchor (strong ones only) + top confluence zones
-    for (const l of A.levels) {
+    if (lay('levels')) for (const l of A.levels) {
       if (l.s === 'angles' || l.s === 'planet' || l.w < 1.5 || (l.a != null && l.a !== c.main.i)) continue;
       CHT.lines.push(CHT.candle.createPriceLine({ price: l.p, color: alpha(css(stratColor(l.s)), 0.55), lineWidth: 1, lineStyle: LWC.LineStyle.Dashed, axisLabelVisible: false, title: '' }));
     }
-    A.zones.slice().sort((a, b) => b.score - a.score).slice(0, 6).forEach(z => {
+    if (lay('zones')) A.zones.slice().sort((a, b) => b.score - a.score).slice(0, 6).forEach(z => {
       const r = z.p >= ref;
       CHT.lines.push(CHT.candle.createPriceLine({ price: z.p, color: alpha(css(r ? '--down' : '--up'), 0.85), lineWidth: 2, lineStyle: LWC.LineStyle.Solid, axisLabelVisible: true, title: (r ? 'R ' : 'S ') + z.strats.length }));
     });
+
+    updateProSeries(c, N, ref);
 
     // markers: pivots, anchor, signals
     const mk = [];
     for (const p of c.piv) {
       const isMain = p === c.main;
+      if (!isMain && !lay('pivots')) continue;
       mk.push({ time: sec(p.t), position: p.type === 'H' ? 'aboveBar' : 'belowBar', shape: isMain ? 'circle' : (p.type === 'H' ? 'arrowDown' : 'arrowUp'), color: isMain ? css('--accent') : alpha(css('--muted'), p.tent ? 0.45 : 0.75), size: isMain ? 1.2 : 0.5, text: isMain ? 'محور' : '' });
     }
     const gmin = { A: 3, B: 2, C: 1 }[S.so.minGrade] || 1;
-    for (const s of SIG.list) {
+    if (lay('sigs')) for (const s of SIG.list) {
       if ({ A: 3, B: 2, C: 1 }[s.grade] < gmin) continue;
       mk.push({ time: sec(s.t), position: s.dir > 0 ? 'belowBar' : 'aboveBar', shape: s.dir > 0 ? 'arrowUp' : 'arrowDown', color: css(s.dir > 0 ? '--up' : '--down'), size: s.grade === 'A' ? 2 : 1.4, text: `${s.grade} ${PL[s.P][0]}` });
     }
@@ -534,6 +540,13 @@
     renderLegend(); requestAnimationFrame(drawOverlay);
   }
 
+  /* logical → pixel for fractional positions (the library only maps whole bars) */
+  function lx(ts, fi) {
+    if (fi == null || !isFinite(fi)) return null;
+    const f0 = Math.floor(fi), a = ts.logicalToCoordinate(f0), b = ts.logicalToCoordinate(f0 + 1);
+    if (a == null || b == null) return a;
+    return a + (fi - f0) * (b - a);
+  }
   /* time windows + event ticks on a canvas laid over the pane */
   function drawOverlay() {
     if (!CHT.chart || !CTX || !A) return;
@@ -543,11 +556,11 @@
     const ts = CHT.chart.timeScale(), paneW = r.width - CHT.chart.priceScale('right').width(), paneH = r.height - ts.height();
     octx.save(); octx.beginPath(); octx.rect(0, 0, paneW, paneH); octx.clip();
     const acc = css('--accent');
-    const x = fi => ts.logicalToCoordinate(fi);
+    const x = fi => lx(ts, fi);
     const xn = x(CTX.n - 0.5);
     if (xn != null && xn < paneW) { octx.fillStyle = alpha(css('--fg'), 0.03); octx.fillRect(xn, 0, paneW - xn, paneH); octx.strokeStyle = alpha(css('--faint'), 0.8); octx.setLineDash([3, 4]); octx.beginPath(); octx.moveTo(Math.round(xn) + .5, 0); octx.lineTo(Math.round(xn) + .5, paneH); octx.stroke(); octx.setLineDash([]); }
     const win = CTX.daily ? S.win : 0;
-    A.windows.slice(0, 8).forEach((w, k) => {
+    if (lay('windows')) A.windows.slice(0, 8).forEach((w, k) => {
       const fi = SC.idxOfT(CTX, w.t), x0 = x(fi - win - 0.5), x1 = x(fi + win + 0.5);
       if (x0 == null || x1 == null) return;
       octx.fillStyle = alpha(acc, Math.max(0.06, 0.2 - k * 0.018)); octx.fillRect(x0, 0, Math.max(2, x1 - x0), paneH);
@@ -556,6 +569,7 @@
     for (const e of A.events) { const xe = x(SC.idxOfT(CTX, e.t)); if (xe == null) continue; octx.fillStyle = alpha(css(stratColor(e.s)), 0.85); octx.fillRect(xe - 0.75, paneH - 6, 1.5, 6); }
     // squaring windows for the anchor (price = time) as thin top ticks
     for (const q of SIG.watch) { const xq = x(SC.idxOfT(CTX, q.t)); if (xq == null) continue; octx.fillStyle = css('--pl-' + q.P); octx.beginPath(); octx.arc(xq, 16, 3, 0, Math.PI * 2); octx.fill(); }
+    drawPro(octx, x, p => CHT.candle.priceToCoordinate(p), paneW, paneH);
     renderDrawings(octx, x, p => CHT.candle.priceToCoordinate(p), paneW, paneH);
     octx.restore();
   }
@@ -576,6 +590,8 @@
     const day = Math.floor(CTX.T[ii] / DAY), evs = A.events.filter(e => Math.floor(e.t / DAY) === day).slice(0, 3);
     const sg = SIG.list.find(s => s.i === ii);
     let html = '';
+    const hs = hotAt(param.point.x, param.point.y);
+    if (hs) html += `<div class="hv-sig" style="color:var(--accent)">◆ نقطة حسم · ${glyph(hs.P)} ${PL[hs.P][1]} <span class="num">${fmtP(hs.p)}</span> · ${HOT_N[hs.kind]} · ${fd(hs.t)}</div>`;
     if (sg) html += `<div class="hv-sig ${sg.dir > 0 ? 'side-s' : 'side-r'}">${sg.dir > 0 ? 'شراء' : 'بيع'} ${sg.grade} · ${glyph(sg.P)} ${PL[sg.P][1]} <span class="num">${fmtP(sg.v)}</span> · ${sqText(sg.sq)}</div>`;
     if (near.length) html += near.map(l => `<div><b class="num">${fmtP(l.p)}</b> ${esc(lvLabel(l))}</div>`).join('');
     if (evs.length) html += evs.map(e => `<div class="hv-ev">${esc(evLabel(e))}</div>`).join('');
@@ -586,7 +602,8 @@
     const sym = `<b>${esc(S.sym)}</b> · ${TF_N[S.tf] || S.tf}`;
     if (i == null) { el.innerHTML = `${sym} · <span class="num">${fd(CTX.T[Math.max(0, fi || 0)])}</span> <span style="color:var(--faint)">مستقبل</span>`; return; }
     const b = CTX.bars[i], p = i ? CTX.bars[i - 1].c : b.o, ch = (b.c - p) / p, cl = ch >= 0 ? 'side-s' : 'side-r';
-    el.innerHTML = `${sym} · <span class="num">${fd(b.t)}</span><span class="o num">O <i class="${cl}">${fmtP(b.o)}</i> H <i class="${cl}">${fmtP(b.h)}</i> L <i class="${cl}">${fmtP(b.l)}</i> C <i class="${cl}">${fmtP(b.c)}</i> <i class="${cl}">${pct(ch)}</i></span>`;
+    el.innerHTML = `${sym} · <span class="num">${fd(b.t)}</span><span class="o num">O <i class="${cl}">${fmtP(b.o)}</i> H <i class="${cl}">${fmtP(b.h)}</i> L <i class="${cl}">${fmtP(b.l)}</i> C <i class="${cl}">${fmtP(b.c)}</i> <i class="${cl}">${pct(ch)}</i></span>${i === CTX.n - 1 ? '<span class="cd" id="cd"></span>' : ''}`;
+    tickCountdown();
   }
   function onChartClick(param) {
     if (!CTX || param.logical == null || !param.point) return;
@@ -712,7 +729,7 @@
   const sigKey = s => `${S.sym}|${S.tf}|${s.t}|${s.P}|${s.off}|${s.dir}`;
   function markSeen() { if (SIG.live) AL.seen.add(sigKey(SIG.live)); }
   function checkAlerts() {
-    if (!AL.on || S.source !== 'live' || !CTX) return;
+    if (!AL.on || S.source !== 'live' || !CTX || RP.on) return;
     const s = SIG.live;
     if (s && !AL.seen.has(sigKey(s))) {
       AL.seen.add(sigKey(s)); beep('sig');
@@ -735,16 +752,207 @@
   }
   document.addEventListener('visibilitychange', () => { if (!document.hidden && AL.on) document.title = AL.base; });
 
+  /* ================= PRO CHART: layers, price-time map, time pressure, profile, sessions, countdown, replay ================= */
+  const LAYERS = [
+    ['planets', 'خطوط الكواكب'], ['curves', 'منحنيات التربيع (مربع ٩)'], ['hot', 'نقاط الحسم'], ['fan', 'مروحة جان'],
+    ['levels', 'مستويات المحور'], ['zones', 'مناطق التلاقي R/S'], ['profile', 'ملف التلاقي على اليمين'], ['hist', 'ضغط الزمن (أسفل الرسم)'],
+    ['windows', 'نوافذ الزمن'], ['sessions', 'جلسات آسيا/لندن/نيويورك'], ['pivots', 'القمم والقيعان'], ['sigs', 'أسهم الإشارات'],
+  ];
+  const lay = k => (S.layers || {})[k] !== false;
+  function initLayers() {
+    const pop = $('#layersPop');
+    pop.innerHTML = LAYERS.map(([k, n]) => `<div class="inline"><span class="lbl">${n}</span><button class="sw sm" role="switch" data-ly="${k}" aria-label="${n}"></button></div>`).join('');
+    const sync = () => $$('[data-ly]').forEach(b => b.setAttribute('aria-checked', lay(b.dataset.ly)));
+    sync();
+    pop.addEventListener('click', e => { const b = e.target.closest('[data-ly]'); if (!b) return; S.layers[b.dataset.ly] = !lay(b.dataset.ly); sync(); save(); updateChart(true); });
+    $('#btnLayers').onclick = e => { e.stopPropagation(); pop.hidden = !pop.hidden; $('#btnLayers').setAttribute('aria-expanded', !pop.hidden); };
+    document.addEventListener('click', e => { if (!pop.hidden && !pop.contains(e.target) && e.target !== $('#btnLayers')) { pop.hidden = true; $('#btnLayers').setAttribute('aria-expanded', 'false'); } });
+  }
+  /* hot spots: a planet's price line crossing a price squared with time (Square of 9 or 1×1) */
+  function computeHot() {
+    const c = CTX, m = c.main;
+    const from = Math.max(m.i + 1, c.n - (c.daily ? 260 : 400)), to = c.n + c.futN - 1;
+    let hs = [];
+    try { hs = SC.hotSpots(c, m, { range: 7 }, from, to); } catch (e) { console.error(e); }
+    const day = t => Math.floor(t / DAY), wScore = new Map();
+    for (const w of A.windows) wScore.set(day(w.t), Math.max(wScore.get(day(w.t)) || 0, w.score));
+    const tol = c.last.c * S.so.touchPct / 100 * 3;
+    for (const h of hs) {
+      h.fi = SC.idxOfT(c, h.t);
+      h.peers = hs.filter(o => o !== h && Math.abs(o.fi - h.fi) <= 1.5 && Math.abs(o.p - h.p) <= tol);
+      h.score = h.w + 0.75 * h.peers.length + 0.25 * (wScore.get(day(h.t)) || 0);
+      h.future = h.t > c.last.t;
+    }
+    SIG.hot = hs;
+    SIG.hotTop = hs.filter(h => h.future).sort((a, b) => b.score - a.score).slice(0, 14).sort((a, b) => a.t - b.t);
+    SIG.hotMax = Math.max(1, ...SIG.hotTop.map(h => h.score));
+  }
+  const HOT_N = { sq9: 'زاوية مربع ٩', sq9o: 'مقابلة مربع ٩', bal1: 'توازن 1×1' };
+  function renderHot() {
+    const ref = CTX.last.c, rows = SIG.hotTop || [];
+    $('#hotSub').textContent = `من ${CTX.main.type === 'H' ? 'قمة' : 'قاع'} ${fmtP(CTX.main.p)} · ${rows.length} نقطة`;
+    $('#hotBody').innerHTML = rows.length ? rows.map(h => `<tr><td style="white-space:nowrap">${fd(h.t)}<small style="color:var(--faint);display:block">${relT(h.t)}</small></td>
+      <td class="num">${fmtP(h.p)}</td><td><span style="color:var(--pl-${h.P})">${glyph(h.P)}</span> ${PL[h.P][1]}${h.off ? ` ⁦+${h.off}°⁩` : ''}${h.peers.length ? ` <small style="color:var(--accent)">+${[...new Set(h.peers.map(p => PL[p.P][1]))].join('، ')}</small>` : ''}</td>
+      <td>${HOT_N[h.kind]}</td><td class="num ${h.p > ref ? 'side-r' : 'side-s'}">${pct((h.p - ref) / ref)}</td>
+      <td><div class="bar" style="width:70px"><span style="width:${(h.score / SIG.hotMax * 100).toFixed(0)}%"></span></div></td></tr>`).join('')
+      : `<tr><td colspan="6"><div class="empty">لا توجد نقاط حسم داخل ±7% من السعر في أفق المسح.</div></td></tr>`;
+  }
+  const relT = t => { const h = (t - CTX.last.t) / 36e5; return h < 48 ? `بعد ${Math.max(0, Math.round(h))} ساعة` : `بعد ${Math.round(h / 24)} يوم`; };
+
+  function updateProSeries(c, N, ref) {
+    // time-pressure histogram in its own band under the candles
+    const showHist = lay('hist');
+    CHT.candle.priceScale().applyOptions({ scaleMargins: { top: 0.06, bottom: showHist ? 0.17 : 0.06 } });
+    if (!showHist) CHT.hist.setData([]);
+    else {
+      const score = new Float64Array(N);
+      for (const e of A.events) { const j = Math.round(SC.idxOfT(c, e.t)); if (j >= c.n && j < N) score[j] += e.w; }
+      for (const h of SIG.hot || []) if (h.future) { const j = Math.round(h.fi); if (j >= c.n && j < N) score[j] += h.w; }
+      let mx = 0; for (let j = c.n; j < N; j++) mx = Math.max(mx, score[j]);
+      const acc = css('--accent'), d = [];
+      for (let j = 0; j < N; j++) d.push(j < c.n || !score[j] ? { time: sec(c.T[j]) } : { time: sec(c.T[j]), value: score[j], color: alpha(acc, 0.25 + 0.7 * score[j] / (mx || 1)) });
+      CHT.hist.setData(d);
+    }
+    // Square-of-9 squared-price curves from the anchor
+    if (lay('curves')) {
+      const m = c.main, lo = ref * 0.92, hi = ref * 1.08, groups = new Map();
+      for (let j = m.i + 1; j < N; j++) for (const q of SC.squaredCurvePrices(c, m, j, lo, hi)) {
+        if (q.kind === 'bal1') continue;
+        const k = q.kind + q.n; if (!groups.has(k)) groups.set(k, { kind: q.kind, pts: [] });
+        groups.get(k).pts.push({ time: sec(c.T[j]), value: q.p });
+      }
+      for (const g of groups.values()) line({ color: alpha(css('--accent'), g.kind === 'sq9' ? 0.75 : 0.4), lineWidth: 1, lineStyle: g.kind === 'sq9' ? LWC.LineStyle.Dashed : LWC.LineStyle.SparseDotted }).setData(g.pts);
+    }
+  }
+
+  function drawPro(ctx2, x, y, paneW, paneH) {
+    const c = CTX;
+    // sessions strip (intraday)
+    if (lay('sessions') && !c.daily) {
+      const r = c.T, ts = CHT.chart.timeScale(), vr = ts.getVisibleLogicalRange(); if (vr) {
+        const cols = { asia: css('--c-nsq'), lon: css('--c-angles'), ny: css('--c-sq9') };
+        for (let j = Math.max(0, Math.floor(vr.from)); j <= Math.min(r.length - 1, Math.ceil(vr.to)); j++) {
+          const h = new Date(r[j]).getUTCHours(), x0 = x(j - 0.5), x1 = x(j + 0.5); if (x0 == null || x1 == null) continue;
+          const s = h < 7 ? 'asia' : h < 13 ? 'lon' : h < 21 ? 'ny' : null; if (!s) continue;
+          ctx2.fillStyle = alpha(cols[s], 0.55); ctx2.fillRect(x0, paneH - 3, x1 - x0, 3);
+        }
+      }
+    }
+    // confluence profile on the right edge
+    if (lay('profile') && A.zones.length) {
+      const zs = A.zones.slice().sort((a, b) => b.score - a.score).slice(0, 14), mx = zs[0].score, ref = c.last.c;
+      for (const z of zs) {
+        const yy = y(z.p); if (yy == null) continue;
+        const w = 18 + 72 * z.score / mx, h = Math.max(3, Math.abs(y(z.p - ref * S.tolPct / 200) - y(z.p + ref * S.tolPct / 200)));
+        ctx2.fillStyle = alpha(css(z.p >= ref ? '--down' : '--up'), 0.38); ctx2.fillRect(paneW - w, yy - h / 2, w, h);
+        ctx2.fillStyle = alpha(css(z.p >= ref ? '--down' : '--up'), 0.9); ctx2.fillRect(paneW - 2, yy - h / 2, 2, h);
+      }
+    }
+    // hot spots
+    if (lay('hot')) {
+      const top = new Set(SIG.hotTop || []);
+      for (const h of SIG.hot || []) {
+        const xx = x(h.fi), yy = y(h.p); if (xx == null || yy == null || xx < 0 || xx > paneW) continue;
+        const big = top.has(h), s = big ? 6 : 3.5, col = css('--pl-' + h.P);
+        ctx2.save(); ctx2.translate(xx, yy); ctx2.rotate(Math.PI / 4);
+        if (big) { ctx2.shadowColor = alpha(css('--accent'), 0.9); ctx2.shadowBlur = 10; }
+        ctx2.fillStyle = h.future ? col : alpha(col, 0.25); ctx2.strokeStyle = h.future ? css('--surface') : col; ctx2.lineWidth = 1.5;
+        ctx2.fillRect(-s, -s, 2 * s, 2 * s); ctx2.strokeRect(-s, -s, 2 * s, 2 * s); ctx2.restore();
+        if (big) { ctx2.fillStyle = col; ctx2.font = '600 12px "Segoe UI Symbol","Apple Symbols","Noto Sans Symbols 2",serif'; ctx2.textAlign = 'center'; ctx2.textBaseline = 'bottom'; ctx2.fillText(glyph(h.P), xx, yy - 9); }
+      }
+    }
+    // replay ghost: what actually happened after the replay point
+    if (RP.on && RP.ghost && RP.full) {
+      const w = Math.max(1, (x(1) - x(0)) * 0.6);
+      for (let k = RP.i + 1; k < Math.min(RP.full.length, RP.i + 1 + c.futN); k++) {
+        const b = RP.full[k], fi = SC.idxOfT(c, b.t), xx = x(fi); if (xx == null) continue;
+        const up = b.c >= b.o; ctx2.strokeStyle = ctx2.fillStyle = alpha(css(up ? '--up' : '--down'), 0.35);
+        ctx2.beginPath(); ctx2.moveTo(xx, y(b.h)); ctx2.lineTo(xx, y(b.l)); ctx2.stroke();
+        const yo = y(b.o), yc = y(b.c); ctx2.fillRect(xx - w / 2, Math.min(yo, yc), w, Math.max(1, Math.abs(yc - yo)));
+      }
+    }
+  }
+  function hotAt(px, py) {
+    if (!lay('hot') || !SIG.hot) return null;
+    const ts = CHT.chart.timeScale(); let best = null, bd = 10;
+    for (const h of SIG.hot) { const xx = lx(ts, h.fi), yy = CHT.candle.priceToCoordinate(h.p); if (xx == null || yy == null) continue; const d = Math.hypot(xx - px, yy - py); if (d < bd) { bd = d; best = h; } }
+    return best;
+  }
+
+  /* candle countdown */
+  function tickCountdown() {
+    const el = document.getElementById('cd'); if (!el || !CTX || S.source !== 'live' || RP.on) { if (el) el.textContent = ''; return; }
+    const step = CTX.daily ? (S.tf === '1week' ? 7 * DAY : DAY) : CTX.step, left = CTX.last.t + step - Date.now();
+    if (left <= 0 || left > step) { el.textContent = ''; return; }
+    const s = Math.floor(left / 1000), hh = Math.floor(s / 3600), mm = Math.floor(s / 60) % 60, ss = s % 60;
+    el.textContent = `تغلق الشمعة بعد ${hh ? hh + ':' : ''}${String(mm).padStart(2, '0')}:${String(ss).padStart(2, '0')}`;
+  }
+  setInterval(tickCountdown, 1000);
+
+  /* ---------- replay ---------- */
+  const RP = { on: false, full: null, i: 0, timer: 0, ghost: true, speed: 700 };
+  function enterReplay() {
+    if (RP.on || BARS.length < 80) return;
+    RP.full = BARS; RP.on = true; RP.i = Math.max(60, BARS.length - (CTX.daily ? 90 : 150));
+    $('#replay').hidden = false; $('#btnReplay').setAttribute('aria-pressed', 'true');
+    const sl = $('#rpSlider'); sl.min = 60; sl.max = RP.full.length - 1; applyReplay(true);
+  }
+  function applyReplay(fit) {
+    RP.i = Math.max(60, Math.min(RP.full.length - 1, RP.i));
+    BARS = RP.full.slice(0, RP.i + 1); if (fit) CHT.fit = true;
+    if (!S.anchorLocked) S.anchorT = null; // the anchor follows the replayed history
+    refresh(!fit);
+    $('#rpSlider').value = RP.i; $('#rpDate').textContent = fd(RP.full[RP.i].t);
+    $('#replayBadge').hidden = false; $('#replayBadge').textContent = 'وضع الإعادة · ' + fd(RP.full[RP.i].t);
+  }
+  function exitReplay() {
+    if (!RP.on) return; clearInterval(RP.timer); RP.timer = 0; RP.on = false;
+    BARS = RP.full; RP.full = null; if (!S.anchorLocked) S.anchorT = null; $('#replay').hidden = true; $('#replayBadge').hidden = true;
+    $('#btnReplay').setAttribute('aria-pressed', 'false'); $('#rpPlay').textContent = '▶'; CHT.fit = true; refresh();
+  }
+  function initReplay() {
+    $('#btnReplay').onclick = () => RP.on ? exitReplay() : enterReplay();
+    $('#rpExit').onclick = exitReplay;
+    $('#rpSlider').oninput = e => { RP.i = +e.target.value; $('#rpDate').textContent = fd(RP.full[RP.i].t); };
+    $('#rpSlider').onchange = e => { RP.i = +e.target.value; applyReplay(false); };
+    $('#replay').addEventListener('click', e => {
+      const b = e.target.closest('[data-step]'); if (!b) return; RP.i += +b.dataset.step; applyReplay(false);
+    });
+    $('#rpPlay').onclick = () => {
+      if (RP.timer) { clearInterval(RP.timer); RP.timer = 0; $('#rpPlay').textContent = '▶'; return; }
+      $('#rpPlay').textContent = '❚❚';
+      RP.timer = setInterval(() => { if (RP.i >= RP.full.length - 1) { clearInterval(RP.timer); RP.timer = 0; $('#rpPlay').textContent = '▶'; return; } RP.i++; applyReplay(false); }, RP.speed);
+    };
+    $('#rpGhost').onclick = () => { RP.ghost = !RP.ghost; $('#rpGhost').setAttribute('aria-checked', RP.ghost); drawOverlay(); };
+  }
+
+  /* ---------- theme + unit presets ---------- */
+  function applyTheme() {
+    const r = document.documentElement;
+    if (S.theme === 'dark' || S.theme === 'light') r.setAttribute('data-theme', S.theme); else r.removeAttribute('data-theme');
+    $('#themeBtn').setAttribute('aria-label', 'المظهر: ' + ({ dark: 'داكن', light: 'فاتح' }[S.theme] || 'تلقائي'));
+    $('#themeBtn').dataset.mode = S.theme || 'auto';
+  }
+  function initTheme() { $('#themeBtn').onclick = () => { S.theme = { auto: 'dark', dark: 'light', light: 'auto' }[S.theme || 'auto']; save(); applyTheme(); }; applyTheme(); }
+  function renderUnitPresets() {
+    if (!CTX) return; const base = Math.pow(10, Math.floor(Math.log10(CTX.last.c)) - 3);
+    const opts = [0, base, 2 * base, 5 * base, 10 * base];
+    $('#unitPresets').innerHTML = opts.map(v => `<button type="button" class="chip-btn" data-u="${v}" aria-pressed="${(S.unit || 0) === v}">${v ? '$' + (+v.toPrecision(3)) : 'تلقائي'}</button>`).join('');
+  }
+  function initUnitPresets() { $('#unitPresets').addEventListener('click', e => { const b = e.target.closest('[data-u]'); if (!b) return; S.unit = +b.dataset.u; $('#unit').value = S.unit || ''; refresh(true); }); }
+
   /* ================= SIGNALS ================= */
-  const SIG = { list: [], live: null, watch: [], stat: null };
+  const SIG = { list: [], all: [], live: null, watch: [], stat: null, hot: [], hotTop: [], hotMax: 1 };
   const SQ_N = { bal1: 'توازن 1×1', sq9: 'زاوية مربع ٩', sq9o: 'مقابلة مربع ٩', cyc: 'دورة/مربع زمن', pdeg: 'السعر كدرجات' };
   const sqText = sq => sq && sq.list.length ? sq.list.map(k => SQ_N[k]).join(' + ') : 'بدون تربيع';
   function soOpts() { return Object.assign({}, S.so, { win: S.so.win }); }
   function computeSignals() {
     const so = soOpts();
     so.useMainFrom = S.anchorLocked ? CTX.n - 5 : null;
-    SIG.list = SC.signals(CTX, so, 0);
-    SC.simulate(CTX, SIG.list, S.so.hold);
+    const GR = { A: 3, B: 2, C: 1 }, gmin = GR[S.so.minGrade] || 1;
+    SIG.all = SC.signals(CTX, so, 0);
+    SC.simulate(CTX, SIG.all, S.so.hold);
+    SIG.list = SIG.all.filter(s => GR[s.grade] >= gmin);
     const lastI = CTX.n - 1;
     SIG.live = SIG.list.filter(s => s.i >= lastI - 1).sort((a, b) => b.score - a.score)[0] || null;
     // watch plan: the next time each nearby planet line squares with time from the anchor
@@ -766,7 +974,7 @@
     }
     SIG.watch.sort((a, b) => a.t - b.t);
     SIG.watch = SIG.watch.filter((w, k, arr) => arr.findIndex(x => x.P === w.P && x.off === w.off && Math.abs(x.v0 - w.v0) < 1e-9) === k).slice(0, 10);
-    SIG.stat = { all: SC.stats(SIG.list), A: SC.stats(SIG.list.filter(s => s.grade === 'A')), B: SC.stats(SIG.list.filter(s => s.grade === 'B')), C: SC.stats(SIG.list.filter(s => s.grade === 'C')) };
+    SIG.stat = { all: SC.stats(SIG.list), A: SC.stats(SIG.all.filter(s => s.grade === 'A')), B: SC.stats(SIG.all.filter(s => s.grade === 'B')), C: SC.stats(SIG.all.filter(s => s.grade === 'C')) };
     // compare: same touches without any squaring requirement → does squaring add value?
     if (S.so.requireSq) { const base = SC.signals(CTX, Object.assign({}, so, { requireSq: false }), 0); SC.simulate(CTX, base, S.so.hold); SIG.stat.touchOnly = SC.stats(base.filter(s => s.grade === 'C')); }
   }
@@ -803,11 +1011,11 @@
     }
     $('#sigWatch').innerHTML = SIG.watch.length ? `<table><thead><tr><th>التاريخ</th><th>الخط</th><th>سعر الخط يومها</th><th>المسافة الآن</th><th>نوع التربيع</th></tr></thead><tbody>${SIG.watch.map(w => `<tr><td>${fd(w.t)}<small style="color:var(--faint);display:block">+${Math.round((w.t - c.last.t) / DAY)} يوم</small></td><td><span style="color:var(--pl-${w.P})">${glyph(w.P)}</span> ${PL[w.P][1]}${w.off ? ` ⁦+${w.off}°⁩` : ''}</td><td class="num">${fmtP(w.v)}</td><td class="num ${w.v > c.last.c ? 'side-r' : 'side-s'}">${pct((w.v - c.last.c) / c.last.c)}</td><td>${sqText(w.sq)}</td></tr>`).join('')}</tbody></table>` : `<div class="empty">لا يوجد خط كوكبي قريب (±6%) يتربع مع الزمن داخل أفق المسح. زد الأفق أو فعّل كواكب أخرى.</div>`;
     const st = SIG.stat;
-    $('#sigStats').innerHTML = statCard('all', st.all, 'كل الإشارات') + statCard('A', st.A, 'الدرجة A') + statCard('B', st.B, 'الدرجة B') + (st.touchOnly ? statCard('t', st.touchOnly, 'لمس بدون تربيع (للمقارنة)') : statCard('C', st.C, 'الدرجة C'));
+    $('#sigStats').innerHTML = statCard('all', st.all, `الإشارات المعتمدة (${S.so.minGrade === 'C' ? 'الكل' : S.so.minGrade === 'B' ? 'B وأعلى' : 'A فقط'})`) + statCard('A', st.A, 'الدرجة A') + statCard('B', st.B, 'الدرجة B') + (st.touchOnly ? statCard('t', st.touchOnly, 'لمس بدون تربيع (للمقارنة)') : statCard('C', st.C, 'الدرجة C'));
     const rows = SIG.list.slice().reverse().slice(0, 60);
     $('#sigBody').innerHTML = rows.length ? rows.map(s => {
       const r = s.res, rk = r.kind === 'target' ? ['side-s', 'الهدف'] : r.kind === 'stop' ? ['side-r', 'الوقف'] : r.kind === 'time' ? ['', 'انتهاء المدة'] : ['', 'مفتوحة'];
-      return `<tr><td class="num" style="white-space:nowrap">${fd(s.t)}</td><td><span class="pill ${s.dir > 0 ? 'up' : 'down'}">${s.dir > 0 ? 'شراء' : 'بيع'} ${s.grade}</span></td><td><span style="color:var(--pl-${s.P})">${glyph(s.P)}</span> ${PL[s.P][1]}${s.off ? ` ⁦+${s.off}°⁩` : ''} <span class="num">${fmtP(s.v)}</span></td><td style="font-size:.8rem">${sqText(s.sq)}</td><td class="num">${fmtP(s.entry)}</td><td class="num side-r">${fmtP(s.stop)}</td><td class="num side-s">${fmtP(s.t1)}</td><td class="num ${rk[0]}">${rk[1]} ${r.R >= 0 ? '+' : ''}${r.R.toFixed(2)}R</td></tr>`;
+      return `<tr><td style="white-space:nowrap">${fd(s.t)}</td><td><span class="pill ${s.dir > 0 ? 'up' : 'down'}">${s.dir > 0 ? 'شراء' : 'بيع'} ${s.grade}</span></td><td><span style="color:var(--pl-${s.P})">${glyph(s.P)}</span> ${PL[s.P][1]}${s.off ? ` ⁦+${s.off}°⁩` : ''} <span class="num">${fmtP(s.v)}</span></td><td style="font-size:.8rem">${sqText(s.sq)}</td><td class="num">${fmtP(s.entry)}</td><td class="num side-r">${fmtP(s.stop)}</td><td class="num side-s">${fmtP(s.t1)}</td><td class="num ${rk[0]}">${rk[1]} ${r.R >= 0 ? '+' : ''}${r.R.toFixed(2)}R</td></tr>`;
     }).join('') : `<tr><td colspan="8"><div class="empty">لا توجد إشارات بهذه القواعد في البيانات الحالية.</div></td></tr>`;
     $('#sigSub').textContent = `${SIG.list.length} إشارة · احتفاظ حتى ${S.so.hold} شمعة`;
   }
@@ -817,7 +1025,7 @@
   const TF_N = { '15min': '15 دقيقة', '1h': 'ساعة', '4h': '4 ساعات', '1day': 'يومي', '1week': 'أسبوعي' };
   const LIVE = { env: { mcp: null }, feed: null, at: null, meta: null, tickTimer: 0, lastRefresh: 0 };
   const clock = t => new Date(t).toLocaleTimeString('ar-EG-u-nu-latn', { hour: '2-digit', minute: '2-digit', second: '2-digit' });
-  const digitsFor = p => p >= 1000 ? 2 : p >= 100 ? 3 : p >= 10 ? 3 : p >= 1 ? 5 : 6;
+  const digitsFor = p => p >= 1000 ? 2 : p >= 100 ? 2 : p >= 10 ? 3 : p >= 1 ? 5 : 6;
   function setStatus(kind, text, action) {
     const el = $('#live'); el.className = 'live ' + kind;
     el.querySelector('.lt').textContent = text;
@@ -838,15 +1046,17 @@
       onStatus: st => { setStatus(st.kind, st.text, st.action); if (st.kind === 'err' && S.source !== 'live' && !BARS.length) { setData(SAMPLE, false); refresh(); } },
       onNeedKey: openKeySettings,
       onBars: (bars, meta, reload) => {
+        if (RP.on) { if (sym === S.sym && tf === S.tf) RP.full = bars; return; }
         if (sym !== S.sym || tf !== S.tf) return;
         const fresh = !reload || S.source !== 'live' || !BARS.length || BARS[0].t !== bars[0].t;
         BARS = bars; S.source = 'live'; LIVE.meta = meta;
-        dig = meta.decimals != null ? Math.min(Math.max(meta.decimals, 2), 6) : digitsFor(bars[bars.length - 1].c);
+        dig = meta.decimals != null ? Math.min(meta.decimals, digitsFor(bars[bars.length - 1].c)) : digitsFor(bars[bars.length - 1].c);
         LIVE.at = Date.now();
         if (fresh) { CHT.fit = true; if (!S.anchorLocked) S.anchorT = null; }
         refresh(!fresh);
       },
       onTick: k => {
+        if (RP.on) return;
         if (sym !== S.sym || tf !== S.tf || !BARS.length) return;
         const last = BARS[BARS.length - 1];
         if (k.t === last.t) Object.assign(last, { o: k.o, h: k.h, l: k.l, c: k.c });
@@ -953,7 +1163,7 @@
 
   /* ---------- boot ---------- */
   function boot() {
-    buildRail(); initTabs(); initChart(); initHeader(); initSigPanel(); initTools(); initKeyBox();
+    buildRail(); initTabs(); initChart(); initHeader(); initSigPanel(); initTools(); initKeyBox(); initLayers(); initReplay(); initTheme(); initUnitPresets();
     $('#btnAlert').onclick = toggleAlerts;
     $('#jump').onclick = () => $('.rail').scrollIntoView({ behavior: matchMedia('(prefers-reduced-motion: reduce)').matches ? 'auto' : 'smooth', block: 'start' });
     let ok = false;
