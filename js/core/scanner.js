@@ -10,11 +10,14 @@
     { id: 'nsq', g: 'price', on: false },
     { id: 'sq144', g: 'price', on: false },
     { id: 'planet', g: 'price', on: true },
+    { id: 'ptime', g: 'price', on: true },
+    { id: 'box', g: 'price', on: false },
     { id: 'cycles', g: 'time', on: true },
     { id: 'tsq', g: 'time', on: true },
     { id: 'anniv', g: 'time', on: true },
     { id: 'season', g: 'time', on: true },
     { id: 'ptsq', g: 'time', on: true },
+    { id: 'boxt', g: 'time', on: false },
     { id: 'aspects', g: 'astro', on: true },
     { id: 'stations', g: 'astro', on: true },
     { id: 'ingress', g: 'astro', on: false },
@@ -73,6 +76,28 @@
     return lo + (t - T[lo]) / (T[hi] - T[lo]);
   }
 
+
+  /* degrees a planet has travelled since an anchor (retrograde motion subtracts) — cached per anchor */
+  const travelCache = new Map();
+  function planetTravel(ctx, a, i, P) {
+    const helio = ctx.o.helio, key = `${P}|${helio}|${a.t}|${ctx.daily}`;
+    let arr = travelCache.get(key);
+    if (!arr) { arr = { from: a.i, vals: [0], last: G.lon(P, a.t, helio) }; travelCache.set(key, arr); if (travelCache.size > 200) travelCache.delete(travelCache.keys().next().value); }
+    if (arr.last == null) return null;
+    ctx.extendTo(i);
+    while (arr.from + arr.vals.length - 1 < i) {
+      const j = arr.from + arr.vals.length, L = G.lon(P, ctx.T[j], helio);
+      arr.vals.push(arr.vals[arr.vals.length - 1] + G.wrap180(L - arr.last)); arr.last = L;
+    }
+    return i < a.i ? null : arr.vals[i - a.i];
+  }
+  /* Gann box: N price units (× u) by N time units; "52" means 52 weeks */
+  function boxSpan(ctx) {
+    const N = ctx.o.boxN || 52, weeks = N === 52;
+    const time = weeks ? (ctx.o.timeMode === 'bar' ? (ctx.daily ? 52 * 5 : 52) : 364) : N;
+    return { N, price: N * ctx.u, time, label: weeks ? '52 أسبوع' : String(N) };
+  }
+
   /* ---------- PRICE strategies: levels at bar index i ---------- */
   function priceLevels(id, ctx, i, anchors, main, prevOpp, ref) {
     const L = [], o = ctx.o, u = ctx.u, k = ctx.sqk, lo = ref * 0.75, hi = ref * 1.25;
@@ -106,6 +131,22 @@
       for (let m = a0; m <= a1; m++) { push(m * m / k, 1.25, `مربع طبيعي ${m}²`); push((m + 0.5) * (m + 0.5) / k, 0.75, `منتصف ${m}² و ${m + 1}²`); }
     } else if (id === 'sq144') {
       if (main) { const step = 144 * u / 8; for (let j = -24; j <= 24; j++) if (j) push(main.p + j * step, j % 8 === 0 ? 2 : j % 4 === 0 ? 1.5 : j % 2 === 0 ? 1.1 : 0.8, `مربع 144 ${iso((j > 0 ? '+' : '−') + Math.abs(j) + '/8')}`); }
+    } else if (id === 'ptime') {
+      // planetary time: 1×1 = the price moves one degree-price (pf) for every degree the planet travels
+      const P = o.ptPlanet || 'Sun';
+      for (const a of anchors) {
+        const d = planetTravel(ctx, a, i, P); if (d == null || d <= 0) continue;
+        const dir = a.type === 'L' ? 1 : -1;
+        for (const A of ANGLES) {
+          if (a !== main && A.r !== 1) continue;
+          push(a.p + dir * A.r * d * ctx.pf, A.r === 1 ? 2 : (A.r === 2 || A.r === 0.5) ? 1.5 : 1, `زاوية ${P} ${A.l} من ${fmtP(a.p)} (${iso(d.toFixed(1) + '°')})`, { a: a.i, ang: A.l, planet: P, ptime: true });
+        }
+      }
+    } else if (id === 'box') {
+      if (main) {
+        const b = boxSpan(ctx), dir = main.type === 'L' ? 1 : -1;
+        for (let j = -8; j <= 16; j++) if (j) push(main.p + dir * j * b.price / 8, j % 8 === 0 ? 2 : j % 4 === 0 ? 1.75 : j % 2 === 0 ? 1.5 : 1, `صندوق ${b.label} · ${iso((j > 0 ? '+' : '−') + Math.abs(j) + '/8')}`);
+      }
     } else if (id === 'planet') {
       ctx.extendTo(i);
       const t = ctx.T[i] + DAY / 2, pf = ctx.pf;
@@ -165,8 +206,12 @@
         const dg = G.sq9Deg(P);
         for (const [off, w] of [[0, 1.75], [180, 1]]) for (const d of G.sq9NumbersAt(dg + off, 7, 1500)) push(dateAfter(ctx, a, d), w, `مربع ٩: زاوية الزمن تطابق زاوية ${fmtP(a.p)}${off ? ' (مقابلة)' : ''} ${iso(dg.toFixed(0) + '°')}`, a.i);
       }
+      // price converted to time by a ratio (e.g. S&P low 768 → 76.8 months)
+      for (const a of anchors) for (const r of [10, 100]) { const c = a.p * k / r; if (c >= 7 && c <= 1500) push(dateAfter(ctx, a, c), 1.25, `السعر ÷ ${r}: ${fmtP(a.p)} ← ${iso(c.toFixed(1))} ${unitName}`, a.i); }
       const cur = ctx.last.c;
       if (main) { const e = Math.abs(cur - main.p) / u; push(dateAfter(ctx, main, e), 1, `لو بقي السعر عند ${fmtP(cur)} يتربع مع ${fmtP(main.p)}`, main.i); }
+    } else if (id === 'boxt') {
+      if (main) { const b = boxSpan(ctx); for (let q = 1; q <= 16; q++) push(dateAfter(ctx, main, b.time * q / 8), q % 8 === 0 ? 2.25 : q % 4 === 0 ? 1.75 : q % 2 === 0 ? 1.25 : 0.75, `صندوق ${b.label}: ${iso(q + '/8')} من ${fmtP(main.p)}`, main.i); }
     } else if (['season', 'aspects', 'stations', 'ingress', 'lunar'].includes(id)) {
       for (const e of G.astroEvents(t0, t1, ctx.o.planets, ctx.o.helio)) if (e.type === id) ev.push(Object.assign({ s: id, label: '' }, e));
     }
@@ -277,9 +322,14 @@
       cyc: so.mCyc && (CYCLES.some(c => Math.abs(e - c) <= tw) || SQS.some(c => Math.abs(e - c) <= tw)),
       pdeg: so.mPdeg && Math.abs(G.wrap180(G.mod(a.p * ctx.sqk, 360) - G.mod(e, 360))) <= tw,
     };
+    if (so.mPlan) {
+      const d = planetTravel(ctx, a, i, ctx.o.ptPlanet || 'Sun');
+      r.travel = d; r.pUnits = Math.abs(v - a.p) / ctx.pf;
+      r.plan = d != null && d > 0 && Math.abs(r.pUnits - d) <= Math.max(so.degTol / 3, d * so.balTol);
+    }
     r.list = [];
-    if (r.bal1) r.list.push('bal1'); if (r.sq9) r.list.push('sq9'); if (r.sq9o) r.list.push('sq9o'); if (r.cyc) r.list.push('cyc'); if (r.pdeg) r.list.push('pdeg');
-    r.pts = (r.bal1 ? 1.5 : 0) + (r.sq9 ? 1.5 : 0) + (r.sq9o ? 0.75 : 0) + (r.cyc ? 1 : 0) + (r.pdeg ? 1 : 0);
+    if (r.bal1) r.list.push('bal1'); if (r.sq9) r.list.push('sq9'); if (r.sq9o) r.list.push('sq9o'); if (r.cyc) r.list.push('cyc'); if (r.pdeg) r.list.push('pdeg'); if (r.plan) r.list.push('plan');
+    r.pts = (r.bal1 ? 1.5 : 0) + (r.sq9 ? 1.5 : 0) + (r.sq9o ? 0.75 : 0) + (r.cyc ? 1 : 0) + (r.pdeg ? 1 : 0) + (r.plan ? 1.5 : 0);
     return r;
   }
   /* latest pivot that was already confirmed at bar i (k bars on its right exist by then): no look-ahead */
@@ -417,5 +467,5 @@
   }
 
   let fmtP = p => (Math.abs(p) >= 1000 ? p.toFixed(1) : Math.abs(p) >= 10 ? p.toFixed(2) : p.toFixed(4));
-  root.GannScanner = { hotSpots, squaredCurvePrices, signals, simulate, stats, squareState, anchorAt, atrSeries, STRATS, ANGLES, CYCLES, build, elapsedIdx, dateAfter, idxOfT, priceLevels, cluster, timeEvents, windows, backtest, setFmt: f => { fmtP = f; } };
+  root.GannScanner = { planetTravel, boxSpan, hotSpots, squaredCurvePrices, signals, simulate, stats, squareState, anchorAt, atrSeries, STRATS, ANGLES, CYCLES, build, elapsedIdx, dateAfter, idxOfT, priceLevels, cluster, timeEvents, windows, backtest, setFmt: f => { fmtP = f; } };
 })(typeof window !== 'undefined' ? window : globalThis);
