@@ -49,30 +49,45 @@
       </section>
 
       <section class="panel" id="sigSet">
-        <div class="panel-h"><h2>قواعد الصفقة</h2></div>
+        <div class="panel-h"><h2>قواعد جان للصفقة</h2></div>
         <div class="set">
-          <div class="inline"><span class="lbl">اشتراط تربيع السعر بالزمن</span><button class="sw sm" role="switch" data-so="requireSq" aria-label="اشتراط التربيع"></button></div>
-          <div class="fld"><span class="lbl">طرق التربيع المقبولة</span>
-            <div class="inline"><span class="lbl">توازن 1×1 (الزمن = حركة السعر)</span><button class="sw sm" role="switch" data-so="mBal" aria-label="توازن 1×1"></button></div>
-            <div class="inline"><span class="lbl">زاوية مربع ٩ للسعر = للزمن</span><button class="sw sm" role="switch" data-so="mSq9" aria-label="زاوية مربع 9"></button></div>
-            <div class="inline"><span class="lbl">دورة أو مربع زمني من المحور</span><button class="sw sm" role="switch" data-so="mCyc" aria-label="دورة زمنية"></button></div>
-            <div class="inline"><span class="lbl">سعر المحور كدرجات = الزمن</span><button class="sw sm" role="switch" data-so="mPdeg" aria-label="السعر كدرجات"></button></div>
-            <div class="inline"><span class="lbl">حركة السعر = درجات الكوكب</span><button class="sw sm" role="switch" data-so="mPlan" aria-label="زمن الكوكب"></button></div>
+          <div class="fld"><span class="lbl">إعدادات الدخول</span>
+            <div class="inline"><span class="lbl">قاع/قمة مزدوجة أو ثلاثية</span><button class="sw sm" role="switch" data-so="setDbl" aria-label="قاع مزدوج"></button></div>
+            <div class="inline"><span class="lbl">ارتداد 3/8–5/8 مع الاتجاه</span><button class="sw sm" role="switch" data-so="setRet" aria-label="ارتداد"></button></div>
+            <div class="inline"><span class="lbl">كسر آخر قمة/قاع (تحول الاتجاه)</span><button class="sw sm" role="switch" data-so="setBrk" aria-label="كسر"></button></div>
           </div>
           <div class="two">
-            <div class="fld"><label for="soTouch">سماحية اللمس %</label><input type="number" id="soTouch" step="0.01" min="0.02" max="1"></div>
-            <div class="fld"><label for="soDeg">سماحية الزاوية °</label><input type="number" id="soDeg" step="1" min="1" max="20"></div>
+            <div class="fld"><label for="soSwing">مخطط التأرجح</label><select id="soSwing"><option value="1">شمعة واحدة</option><option value="2">شمعتان</option><option value="3">3 شموع</option></select></div>
+            <div class="fld"><label for="soExit">الخروج</label><select id="soExit"><option value="trail">وقف متحرك تحت القيعان</option><option value="target">هدف ثابت</option></select></div>
           </div>
           <div class="two">
-            <div class="fld"><label for="soBal">سماحية 1×1</label><input type="number" id="soBal" step="0.01" min="0.02" max="0.5"></div>
-            <div class="fld"><label for="soGrade">أدنى درجة للإشارة</label><select id="soGrade"><option value="A">A فقط</option><option value="B">B وأعلى</option><option value="C">الكل</option></select></div>
+            <div class="fld"><label for="soStop">الوقف تحت القاع (× ATR)</label><input type="number" id="soStop" step="0.1" min="0" max="3"></div>
+            <div class="fld"><label for="soMaxRisk">أقصى مخاطرة (× ATR)</label><input type="number" id="soMaxRisk" step="0.5" min="1" max="10"></div>
           </div>
           <div class="two">
-            <div class="fld"><label for="soStop">الوقف (× ATR)</label><input type="number" id="soStop" step="0.1" min="0" max="3"></div>
-            <div class="fld"><label for="soRR">أدنى عائد/مخاطرة</label><input type="number" id="soRR" step="0.1" min="0.5" max="5"></div>
+            <div class="fld"><label for="soDbl">سماحية القاع المزدوج (× ATR)</label><input type="number" id="soDbl" step="0.1" min="0.1" max="2"></div>
+            <div class="fld"><label for="soRR">أدنى عائد/مخاطرة للهدف</label><input type="number" id="soRR" step="0.1" min="0.5" max="5"></div>
           </div>
-          <div class="fld"><label for="soHold">أقصى مدة للصفقة (شموع)</label><input type="number" id="soHold" step="1" min="3" max="200"></div>
-          <p class="hint" style="margin:0;font-size:.76rem;color:var(--faint);line-height:1.7">A = لمس + طريقتا تربيع أو أكثر · B = لمس + طريقة واحدة · C = لمس فقط.</p>
+          <div class="two">
+            <div class="fld"><label for="soHold">أقصى مدة (شموع)</label><input type="number" id="soHold" step="1" min="3" max="300"></div>
+            <div class="fld"><label for="soGrade">أدنى درجة</label><select id="soGrade"><option value="A">A فقط</option><option value="B">B وأعلى</option><option value="C">الكل</option></select></div>
+          </div>
+          <div class="fld"><span class="lbl">التأكيد (يحدد الدرجة)</span>
+            <div class="inline"><span class="lbl">تأكيد الزمن عند القاع/القمة</span><button class="sw sm" role="switch" data-so="useTime" aria-label="تأكيد الزمن"></button></div>
+            <div class="two">
+              <div class="fld"><label for="soTimeMin">حد وزن الزمن</label><input type="number" id="soTimeMin" step="0.5" min="0.5" max="10"></div>
+              <div class="fld"><label for="soPriceMin">حد مصادر السعر</label><input type="number" id="soPriceMin" step="1" min="1" max="6"></div>
+            </div>
+            <div class="inline"><span class="lbl">السعر = الزمن: توازن 1×1</span><button class="sw sm" role="switch" data-so="mBal" aria-label="توازن 1×1"></button></div>
+            <div class="inline"><span class="lbl">السعر = الزمن: زاوية مربع ٩</span><button class="sw sm" role="switch" data-so="mSq9" aria-label="زاوية مربع 9"></button></div>
+            <div class="inline"><span class="lbl">السعر = الزمن: دورة أو مربع زمني</span><button class="sw sm" role="switch" data-so="mCyc" aria-label="دورة زمنية"></button></div>
+            <div class="inline"><span class="lbl">السعر = الزمن: درجات الكوكب</span><button class="sw sm" role="switch" data-so="mPlan" aria-label="زمن الكوكب"></button></div>
+            <div class="two">
+              <div class="fld"><label for="soDeg">سماحية الزاوية °</label><input type="number" id="soDeg" step="1" min="1" max="20"></div>
+              <div class="fld"><label for="soBal">سماحية 1×1</label><input type="number" id="soBal" step="0.01" min="0.02" max="0.5"></div>
+            </div>
+          </div>
+          <p class="hint" style="margin:0;font-size:.76rem;color:var(--faint);line-height:1.7">A = الإعداد + تأكيد زمن + تأكيد سعر عند القاع/القمة · B = واحد منهما · C = الإعداد فقط. خطوط الكواكب جزء من تأكيد السعر.</p>
         </div>
       </section>
 
@@ -219,21 +234,21 @@
             <div class="scroll"><table><thead><tr><th>الوقت (UTC)</th><th>السعر</th><th>الكوكب</th><th>التربيع</th><th>المسافة الآن</th><th>القوة</th></tr></thead><tbody id="hotBody"></tbody></table></div>
             <div class="note">كل نقطة هنا = لحظة يقطع فيها خط كوكب منحنى سعر متربع مع الزمن من المحور (جذر السعر − جذر الزمن = عدد صحيح على مربع التسعة، أو حركة السعر = الزمن على 1×1). على الرسم تظهر كمعيّنات ◆: الممتلئة قادمة، والباهتة سابقة لتقارن رد فعل السعر عندها. القوة تزيد عندما يتلاقى أكثر من كوكب في نفس النقطة أو تقع داخل نافذة زمنية.</div></div>
           <div class="cols" style="margin-top:16px">
-            <div class="card"><div class="card-h"><h3>متى تصبح الصفقة جاهزة</h3><span class="sub">أقرب خطوط الكواكب وتاريخ تربيعها مع الزمن</span></div><div class="scroll" id="sigWatch"></div>
-              <div class="note">الصفقة عند جان هنا = <b>السعر يلمس رقم الكوكب</b> (خط الكوكب) <b>في نفس الوقت الذي يتربع فيه السعر مع الزمن</b> من المحور. الجدول يقول لك أي خط سيكون «جاهزًا» ومتى، فإذا وصل السعر إليه في ذلك اليوم تظهر الإشارة.</div></div>
+            <div class="card"><div class="card-h"><h3>المستويات التي ينتظرها الماسح</h3><span class="sub">إعدادات جان القريبة من السعر الآن</span></div><div class="scroll" id="sigWatch"></div>
+              <div class="note">قواعد جان: <b>اشترِ عند القاع المزدوج أو الثلاثي</b>، و<b>عند ارتداد 50%</b> (بين 3/8 و5/8) في اتجاه صاعد، و<b>عندما يغلق السعر فوق آخر قمة</b>. الوقف تحت القاع الذي بُنيت عليه الصفقة، ثم يُرفع تحت كل قاع تأرجح جديد. البيع بالعكس. نقاط الحسم وخطوط الكواكب والدورات تحدد درجة الصفقة.</div></div>
             <div style="display:flex;flex-direction:column;gap:16px;min-width:0"><div class="card"><div class="card-h"><h3>سجل التنبيهات</h3><span class="sub">فعّل الجرس فوق الرسم</span></div><ul class="alog" id="alertLog"></ul></div>
             <div class="card"><div class="card-h"><h3>أداء القواعد تاريخيًا</h3><span class="sub" id="sigSub"></span></div><div class="stats" id="sigStats"></div>
-              <div class="note">كل إشارة تُحاكى للأمام: الوقف أولًا إذا لُمس الوقف والهدف في نفس الشمعة (افتراض متحفظ). القيمة بالـ R = الربح مقسومًا على المخاطرة. قيمة موجبة ثابتة على مئات الصفقات هي ما يهم، وليس صفقة واحدة ناجحة.</div></div></div>
+              <div class="note">كل صفقة تُحاكى للأمام بالبيانات المتاحة وقتها فقط: الوقف أولًا إذا لُمس الوقف والهدف في نفس الشمعة، ودخول الوقف المتحرك بعد تأكيد القاع الجديد فقط. القيمة بالـ R = الربح مقسومًا على المخاطرة. قيمة موجبة ثابتة على مئات الصفقات هي ما يهم، وليس صفقة واحدة ناجحة.</div></div></div>
           </div>
           <div class="card" style="margin-top:16px"><div class="card-h"><h3>سجل الإشارات</h3><span class="sub">الأحدث أولًا · آخر 60</span></div>
-            <div class="scroll"><table><thead><tr><th>التاريخ</th><th>الاتجاه</th><th>خط الكوكب</th><th>التربيع</th><th>الدخول</th><th>الوقف</th><th>الهدف</th><th>النتيجة</th></tr></thead><tbody id="sigBody"></tbody></table></div></div>
+            <div class="scroll"><table><thead><tr><th>التاريخ</th><th>الاتجاه</th><th>الإعداد</th><th>التأكيد</th><th>الدخول</th><th>الوقف</th><th>الهدف</th><th>النتيجة</th></tr></thead><tbody id="sigBody"></tbody></table></div></div>
         </div>
 
         <div class="pane" data-p="scan" hidden>
           <div class="card">
             <div class="card-h"><h3>مسح عدة أدوات بنفس القواعد</h3><span class="sub">نفس الإطار الزمني والكواكب وقواعد الصفقة</span></div>
             <div class="calc"><div class="fld" style="flex:3"><label for="msList">الرموز (افصل بفاصلة)</label><input type="text" id="msList" dir="ltr" spellcheck="false"></div><button class="btn" id="msRun" type="button">ابدأ المسح</button></div>
-            <div class="scroll"><table><thead><tr><th>الرمز</th><th>السعر</th><th>إشارة آخر 3 شموع</th><th>أقرب خط كوكب</th><th>تربيع السعر بالزمن عند الخط</th><th></th></tr></thead><tbody id="msBody"></tbody></table></div>
+            <div class="scroll"><table><thead><tr><th>الرمز</th><th>السعر</th><th>صفقة جان</th><th>أقرب خط كوكب</th><th>أقرب إعداد قادم</th><th></th></tr></thead><tbody id="msBody"></tbody></table></div>
           </div>
         </div>
 

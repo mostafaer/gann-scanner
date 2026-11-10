@@ -466,6 +466,174 @@
     return out.sort((x, y) => x.t - y.t);
   }
 
+  /* ================= GANN TRADING RULES =================
+     Entries and exits the way Gann wrote them, evaluated bar by bar with only the information
+     available at that bar (no look-ahead):
+       • Swing chart (N-bar): a swing point is known only on the bar that confirms it.
+       • Trend: up after a close above the last swing top, down after a close below the last swing bottom.
+       • Setups  dbl : double/triple bottom (top) — a new swing low holds within tolerance of earlier lows
+                 ret : 3/8–5/8 retracement (50% key) of the last swing, in the direction of the trend
+                 brk : close through the last swing top (bottom) — "buy when the market crosses the old top"
+       • Stop    : just under the bottom the trade is built on (Gann: 1–3 points under the bottom)
+       • Exit    : trail the stop under each new swing bottom (top) as it is confirmed, or a fixed target
+       • Grade   : confirmation from Gann time (cycles, anniversaries, seasonal, squares, aspects/stations,
+                   price = time) and price (Square of 9, eighths, angles, planet lines…) at the turning point. */
+  function swingStream(bars, N) {
+    const conf = []; // {i, p, type:'H'|'L', conf}
+    if (bars.length < 3) return conf;
+    let dir = bars[1].c >= bars[0].c ? 1 : -1, ext = { i: 0, p: dir > 0 ? bars[0].h : bars[0].l }, cnt = 0, cand = null, prev = bars[0];
+    for (let i = 1; i < bars.length; i++) {
+      const b = bars[i];
+      if (b.h <= prev.h && b.l >= prev.l) continue;
+      if (dir > 0) {
+        if (b.h > ext.p) { ext = { i, p: b.h }; cnt = 0; cand = null; }
+        if (b.l < prev.l) { cnt++; if (!cand || b.l < cand.p) cand = { i, p: b.l }; } else { cnt = 0; cand = null; }
+        if (cnt >= N) { conf.push({ i: ext.i, p: ext.p, type: 'H', conf: i }); dir = -1; ext = cand; cnt = 0; cand = null; }
+      } else {
+        if (b.l < ext.p) { ext = { i, p: b.l }; cnt = 0; cand = null; }
+        if (b.h > prev.h) { cnt++; if (!cand || b.h > cand.p) cand = { i, p: b.h }; } else { cnt = 0; cand = null; }
+        if (cnt >= N) { conf.push({ i: ext.i, p: ext.p, type: 'L', conf: i }); dir = 1; ext = cand; cnt = 0; cand = null; }
+      }
+      prev = b;
+    }
+    return conf;
+  }
+  const TIME_IDS = ['cycles', 'tsq', 'anniv', 'season', 'ptsq', 'boxt', 'aspects', 'stations'];
+  const PRICE_IDS = ['sq9', 'angles', 'div', 'nsq', 'sq144', 'planet', 'ptime', 'box'];
+  /* all time events over the history, each kept only if its anchor was confirmed before the event */
+  function historicalTime(ctx, on) {
+    const k = ctx.o.pivK, raw = (ctx.piv.raw || ctx.piv).filter(p => !p.tent), t0 = ctx.bars[0].t, t1 = ctx.T[ctx.n - 1];
+    const out = [];
+    for (const id of TIME_IDS) {
+      if (!on(id)) continue;
+      const anchors = ['cycles', 'tsq', 'ptsq', 'boxt'].includes(id) ? raw : raw;
+      let ev = [];
+      if (id === 'boxt' || id === 'ptsq') { for (const a of raw) ev.push(...timeEvents(id, ctx, t0, t1, [a], a)); }
+      else ev = timeEvents(id, ctx, t0, t1, anchors, raw[raw.length - 1]);
+      for (const e of ev) { const at = idxOfT(ctx, e.t); if (e.a == null || e.a + k <= at) out.push(Object.assign(e, { at })); }
+    }
+    return out.sort((a, b) => a.at - b.at);
+  }
+  function gannTrades(ctx, so, on) {
+    const bars = ctx.bars, n = ctx.n, atr = atrSeries(bars, 14), sw = swingStream(bars, so.swingN || 2), k = ctx.o.pivK;
+    const tEv = so.useTime ? historicalTime(ctx, on) : [];
+    const out = [];
+    let trend = 0, prevTrend = 0, si = 0, lastBrk = { 1: -1, '-1': -1 };
+    const known = []; // swings confirmed so far
+    const timeAt = (idx) => { const W = so.win; let w = 0; const hits = []; for (const e of tEv) { if (e.at < idx - W - 0.5) continue; if (e.at > idx + W + 0.5) break; w += e.w; hits.push(e); } return { w, hits }; };
+    const priceAt = (idx, price) => {
+      const anchors = (ctx.piv.raw || ctx.piv).filter(p => p.i + k <= idx).slice(-3); if (anchors.length < 2) return { strats: [], items: [] };
+      const main = anchors[anchors.length - 1], prevOpp = anchors[anchors.length - 2], items = [];
+      for (const id of PRICE_IDS) if (on(id)) for (const l of priceLevels(id, ctx, idx, anchors, main, prevOpp, price)) if (Math.abs(l.p - price) <= price * so.tolPct / 100) items.push(l);
+      return { strats: [...new Set(items.map(x => x.s))], items };
+    };
+    for (let i = 2; i < n; i++) {
+      const b = bars[i], A = atr[i] || b.c * 0.01;
+      const fresh = [];
+      while (si < sw.length && sw[si].conf === i) { known.push(sw[si]); fresh.push(sw[si]); si++; }
+      const tops = known.filter(s => s.type === 'H'), bots = known.filter(s => s.type === 'L');
+      const lastTop = tops[tops.length - 1], lastBot = bots[bots.length - 1];
+      prevTrend = trend;
+      if (lastTop && b.c > lastTop.p && lastTop.conf < i) trend = 1;
+      else if (lastBot && b.c < lastBot.p && lastBot.conf < i) trend = -1;
+      const cands = [];
+      // --- swing-point setups (on the bar that confirms the new swing) ---
+      for (const s of fresh) {
+        const dir = s.type === 'L' ? 1 : -1, same = (dir > 0 ? bots : tops).slice(0, -1).slice(-3), opp = (dir > 0 ? tops : bots);
+        const tol = Math.max(so.dblAtr * (atr[s.i] || A), s.p * 0.0005);
+        // double / triple
+        if (so.setDbl) {
+          const m = same.filter(x => Math.abs(x.p - s.p) <= tol && opp.some(o => o.i > x.i && o.i < s.i));
+          const broken = same.some(x => x.i > (m[0] ? m[0].i : Infinity) && (dir > 0 ? x.p < s.p - tol : x.p > s.p + tol));
+          if (m.length && !broken) cands.push({ setup: m.length >= 2 ? 'tpl' : 'dbl', dir, base: s, ref: m[m.length - 1] });
+        }
+        // retracement 3/8 – 5/8 of the last swing, with the trend
+        if (so.setRet && trend === dir) {
+          const leg0 = same[same.length - 1], leg1 = opp[opp.length - 1];
+          if (leg0 && leg1 && leg1.i > leg0.i && leg1.i < s.i) {
+            const range = Math.abs(leg1.p - leg0.p), r = Math.abs(leg1.p - s.p) / (range || 1);
+            if (range > 0 && r >= 0.375 - so.retTol && r <= 0.625 + so.retTol) cands.push({ setup: 'ret', dir, base: s, ratio: r, leg: [leg0, leg1] });
+          }
+        }
+      }
+      // --- breakout of the old top / bottom (trend change) ---
+      if (so.setBrk && trend !== prevTrend && trend !== 0 && i - lastBrk[trend] > 3) {
+        const dir = trend, base = dir > 0 ? lastBot : lastTop, level = dir > 0 ? lastTop : lastBot;
+        if (base && level) { cands.push({ setup: 'brk', dir, base, level }); lastBrk[dir] = i; }
+      }
+      for (const c of cands) {
+        const dir = c.dir, entry = b.c, buf = so.stopAtr * A;
+        const stop = dir > 0 ? Math.min(c.base.p, c.ref ? c.ref.p : Infinity) - buf : Math.max(c.base.p, c.ref ? c.ref.p : -Infinity) + buf;
+        const risk = (entry - stop) * dir;
+        if (!(risk > 0) || risk > so.maxRiskAtr * A) continue;
+        // confirmation at the turning point
+        const tm = timeAt(c.base.i), pr = priceAt(c.base.i, c.base.p);
+        const anc = anchorAt(ctx, c.base.i, k), sq = anc ? squareState(ctx, anc, c.base.i, c.base.p, so) : null;
+        const timeOK = tm.w >= so.timeMin || (sq && sq.list.length > 0);
+        const priceOK = pr.strats.length >= so.priceMin;
+        const withTrend = trend === dir;
+        let grade = timeOK && priceOK ? 'A' : timeOK || priceOK ? 'B' : 'C';
+        if (!withTrend && c.setup !== 'dbl' && c.setup !== 'tpl') grade = grade === 'A' ? 'B' : 'C';
+        // targets: the opposite swing (dbl/ret) or Square of 9 from the bottom/top
+        const opp = dir > 0 ? lastTop : lastBot;
+        const sq90 = G.sq9Move(c.base.p * ctx.sqk, dir * 90) / ctx.sqk, sq180 = G.sq9Move(c.base.p * ctx.sqk, dir * 180) / ctx.sqk;
+        let t1 = [opp && (opp.p - entry) * dir > 0 ? opp.p : null, sq90].filter(v => v != null && isFinite(v) && (v - entry) * dir >= risk * so.minRR).sort((x, y) => (x - y) * dir)[0];
+        if (t1 == null) t1 = entry + dir * risk * so.minRR;
+        let t2 = isFinite(sq180) && (sq180 - t1) * dir > 0 ? sq180 : entry + dir * Math.abs(t1 - entry) * 2;
+        const score = (grade === 'A' ? 3 : grade === 'B' ? 2 : 1) + Math.min(2, tm.w / 3) + pr.strats.length * 0.4 + (withTrend ? 0.5 : 0);
+        out.push({ i, t: b.t, dir, setup: c.setup, base: c.base, ref: c.ref, ratio: c.ratio, level: c.level, entry, stop, risk, t1, t2, grade, score, withTrend, time: tm, price: pr, sq, atr: A,
+          // old fields kept for the UI
+          P: null, v: c.base.p, a: anc || c.base });
+      }
+    }
+    // one trade per bar: keep the best
+    const best = new Map(); for (const s of out) { const k2 = s.i + '|' + s.dir; if (!best.has(k2) || best.get(k2).score < s.score) best.set(k2, s); }
+    const list = [...best.values()].sort((a, b) => a.i - b.i);
+    simulateGann(ctx, list, sw, so, atr);
+    return { list, swings: sw };
+  }
+  /* Gann exits: stop first; trail under each newly confirmed swing (after 1R the stop is at least break-even);
+     optional fixed target; time stop; exit on a close through the last swing against the trade */
+  function simulateGann(ctx, sigs, sw, so, atr) {
+    const bars = ctx.bars, n = ctx.n;
+    for (const s of sigs) {
+      let stop = s.stop, res = null, moved1R = false;
+      for (let j = s.i + 1; j < n; j++) {
+        const b = bars[j];
+        if (s.dir > 0 ? b.l <= stop : b.h >= stop) { res = { kind: stop === s.stop ? 'stop' : 'trail', j, px: Math.min(stop, b.o * (s.dir > 0 ? 1 : 1)) }; res.px = s.dir > 0 ? Math.min(stop, b.o) : Math.max(stop, b.o); break; }
+        if (so.exitMode === 'target' && (s.dir > 0 ? b.h >= s.t1 : b.l <= s.t1)) { res = { kind: 'target', j, px: s.t1 }; break; }
+        if (j - s.i >= so.hold) { res = { kind: 'time', j, px: b.c }; break; }
+        // update trailing stop at the close of bar j (applies from j+1)
+        if (!moved1R && (b.c - s.entry) * s.dir >= s.risk) { moved1R = true; stop = s.dir > 0 ? Math.max(stop, s.entry) : Math.min(stop, s.entry); }
+        if (so.exitMode !== 'target') for (const p of sw) {
+          if (p.conf !== j || p.i <= s.i) continue;
+          if (s.dir > 0 && p.type === 'L') stop = Math.max(stop, p.p - so.stopAtr * (atr[j] || 0));
+          if (s.dir < 0 && p.type === 'H') stop = Math.min(stop, p.p + so.stopAtr * (atr[j] || 0));
+        }
+      }
+      if (!res) res = { kind: 'open', j: n - 1, px: bars[n - 1].c };
+      res.R = (res.px - s.entry) * s.dir / s.risk;
+      res.stopNow = stop;
+      s.res = res;
+    }
+    return sigs;
+  }
+  /* setups that would trigger next: where to buy/sell if price gets there */
+  function pendingSetups(ctx, so, sw) {
+    const n = ctx.n, last = ctx.bars[n - 1], known = sw.filter(s => s.conf <= n - 1);
+    const tops = known.filter(s => s.type === 'H'), bots = known.filter(s => s.type === 'L'), out = [];
+    const lt = tops[tops.length - 1], lb = bots[bots.length - 1], plt = tops[tops.length - 2], plb = bots[bots.length - 2];
+    let trend = 0; for (let i = 0; i < n; i++) { const c = ctx.bars[i].c, T = tops.filter(s => s.conf < i).pop(), B = bots.filter(s => s.conf < i).pop(); if (T && c > T.p) trend = 1; else if (B && c < B.p) trend = -1; }
+    if (lb) out.push({ dir: 1, setup: 'dbl', p: lb.p, note: 'قاع مزدوج على آخر قاع', from: lb });
+    if (lt) out.push({ dir: -1, setup: 'dbl', p: lt.p, note: 'قمة مزدوجة على آخر قمة', from: lt });
+    if (trend > 0 && lb && lt && lt.i > lb.i) for (const f of [0.375, 0.5, 0.625]) out.push({ dir: 1, setup: 'ret', p: lt.p - (lt.p - lb.p) * f, note: `ارتداد ${f === 0.5 ? '50%' : f === 0.375 ? '3/8' : '5/8'} من الصعود`, from: lt });
+    if (trend < 0 && lb && lt && lb.i > lt.i) for (const f of [0.375, 0.5, 0.625]) out.push({ dir: -1, setup: 'ret', p: lb.p + (lt.p - lb.p) * f, note: `ارتداد ${f === 0.5 ? '50%' : f === 0.375 ? '3/8' : '5/8'} من الهبوط`, from: lb });
+    if (lt && trend <= 0) out.push({ dir: 1, setup: 'brk', p: lt.p, note: 'إغلاق فوق آخر قمة = تحول للصعود', from: lt });
+    if (lb && trend >= 0) out.push({ dir: -1, setup: 'brk', p: lb.p, note: 'إغلاق تحت آخر قاع = تحول للهبوط', from: lb });
+    for (const o of out) o.dist = (o.p - last.c) / last.c;
+    return { trend, list: out.filter(o => Math.abs(o.dist) <= 0.08).sort((a, b) => Math.abs(a.dist) - Math.abs(b.dist)), lastTop: lt, lastBot: lb };
+  }
+
   let fmtP = p => (Math.abs(p) >= 1000 ? p.toFixed(1) : Math.abs(p) >= 10 ? p.toFixed(2) : p.toFixed(4));
-  root.GannScanner = { planetTravel, boxSpan, hotSpots, squaredCurvePrices, signals, simulate, stats, squareState, anchorAt, atrSeries, STRATS, ANGLES, CYCLES, build, elapsedIdx, dateAfter, idxOfT, priceLevels, cluster, timeEvents, windows, backtest, setFmt: f => { fmtP = f; } };
+  root.GannScanner = { gannTrades, simulateGann, swingStream, pendingSetups, historicalTime, planetTravel, boxSpan, hotSpots, squaredCurvePrices, signals, simulate, stats, squareState, anchorAt, atrSeries, STRATS, ANGLES, CYCLES, build, elapsedIdx, dateAfter, idxOfT, priceLevels, cluster, timeEvents, windows, backtest, setFmt: f => { fmtP = f; } };
 })(typeof window !== 'undefined' ? window : globalThis);

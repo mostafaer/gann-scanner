@@ -47,9 +47,9 @@
     tf: '1day', source: 'sample', anchorLocked: false,
     watchlist: 'XAU/USD, XAG/USD, BTC/USD, ETH/USD, EUR/USD, GBP/USD, USD/JPY, SPY, QQQ, NVDA',
     layers: { levels: false }, theme: 'auto', chartType: 'candles', ptPlanet: 'Sun', boxN: 52, legendCollapsed: null,
-    so: { touchPct: 0.12, requireSq: true, mBal: true, mSq9: true, mCyc: true, mPdeg: false, mPlan: true, balTol: 0.12, degTol: 6, win: 1, cooldown: 5, stopAtr: 0.3, minRR: 1.5, hold: 30, minGrade: 'A' }
+    so: { swingN: 2, setDbl: true, setRet: true, setBrk: true, dblAtr: 0.5, retTol: 0.04, maxRiskAtr: 4, useTime: true, timeMin: 3, priceMin: 3, exitMode: 'trail', touchPct: 0.12, requireSq: true, mBal: true, mSq9: true, mCyc: true, mPdeg: false, mPlan: true, balTol: 0.12, degTol: 6, win: 1, cooldown: 5, stopAtr: 0.3, minRR: 1.5, hold: 40, minGrade: 'B' }
   };
-  const KEY = 'gann-scanner.v2';
+  const KEY = 'gann-scanner.v3';
   let S = load();
   function load() {
     try { const v = JSON.parse(localStorage.getItem(KEY) || 'null'); if (v) return Object.assign({}, DEF, v, { on: Object.assign({}, DEF.on, v.on || {}), so: Object.assign({}, DEF.so, v.so || {}) }); } catch (e) { }
@@ -578,7 +578,7 @@
     const gmin = { A: 3, B: 2, C: 1 }[S.so.minGrade] || 1;
     if (lay('sigs')) for (const s of SIG.list) {
       if ({ A: 3, B: 2, C: 1 }[s.grade] < gmin) continue;
-      mk.push({ time: sec(s.t), position: s.dir > 0 ? 'belowBar' : 'aboveBar', shape: s.dir > 0 ? 'arrowUp' : 'arrowDown', color: css(s.dir > 0 ? '--up' : '--down'), size: s.grade === 'A' ? 2 : 1.4, text: `${s.grade} ${PL[s.P][0]}` });
+      mk.push({ time: sec(s.t), position: s.dir > 0 ? 'belowBar' : 'aboveBar', shape: s.dir > 0 ? 'arrowUp' : 'arrowDown', color: css(s.dir > 0 ? '--up' : '--down'), size: s.grade === 'A' ? 2 : 1.4, text: `${s.grade} ${{ dbl: s.dir > 0 ? 'DB' : 'DT', tpl: s.dir > 0 ? 'TB' : 'TT', ret: (s.ratio * 100).toFixed(0) + '%', brk: 'BO' }[s.setup]}` });
     }
     mk.sort((a, b) => a.time - b.time);
     CHT.candle.setMarkers(mk);
@@ -638,7 +638,7 @@
     let html = '';
     const hs = hotAt(param.point.x, param.point.y);
     if (hs) html += `<div class="hv-sig" style="color:var(--accent)">◆ نقطة حسم · ${glyph(hs.P)} ${PL[hs.P][1]} <span class="num">${fmtP(hs.p)}</span> · ${HOT_N[hs.kind]} · ${fd(hs.t)}</div>`;
-    if (sg) html += `<div class="hv-sig ${sg.dir > 0 ? 'side-s' : 'side-r'}">${sg.dir > 0 ? 'شراء' : 'بيع'} ${sg.grade} · ${glyph(sg.P)} ${PL[sg.P][1]} <span class="num">${fmtP(sg.v)}</span> · ${sqText(sg.sq)}</div>`;
+    if (sg) html += `<div class="hv-sig ${sg.dir > 0 ? 'side-s' : 'side-r'}">${sg.dir > 0 ? 'شراء' : 'بيع'} ${sg.grade} · ${setupName(sg)} <span class="num">${fmtP(sg.base.p)}</span> · دخول ${fmtP(sg.entry)} · وقف ${fmtP(sg.stop)}</div>`;
     if (near.length) html += near.map(l => `<div><b class="num">${fmtP(l.p)}</b> ${esc(lvLabel(l))}</div>`).join('');
     if (evs.length) html += evs.map(e => `<div class="hv-ev">${esc(evLabel(e))}</div>`).join('');
     box.innerHTML = html; box.hidden = !html;
@@ -852,26 +852,25 @@
     $('#btnAlert').setAttribute('aria-pressed', AL.on);
     if (AL.on) { markSeen(); beep('near'); toast('التنبيه الصوتي مفعّل. اترك الصفحة مفتوحة ليصلك صوت عند ظهور إشارة.'); } else { document.title = AL.base; toast('التنبيه الصوتي متوقف.'); }
   }
-  const sigKey = s => `${S.sym}|${S.tf}|${s.t}|${s.P}|${s.off}|${s.dir}`;
+  const sigKey = s => `${S.sym}|${S.tf}|${s.t}|${s.setup}|${s.dir}`;
   function markSeen() { if (SIG.live) AL.seen.add(sigKey(SIG.live)); }
   function checkAlerts() {
     if (!AL.on || S.source !== 'live' || !CTX || RP.on) return;
     const s = SIG.live;
     if (s && !AL.seen.has(sigKey(s))) {
       AL.seen.add(sigKey(s)); beep('sig');
-      const msg = `${s.dir > 0 ? 'شراء' : 'بيع'} ${s.grade} · ${S.sym} عند خط ${PL[s.P][1]} ${fmtP(s.v)}`;
+      const msg = `${s.dir > 0 ? 'شراء' : 'بيع'} ${s.grade} · ${S.sym} · ${setupName(s)} · دخول ${fmtP(s.entry)} وقف ${fmtP(s.stop)}`;
       toast('إشارة جديدة: ' + msg); document.title = '● ' + msg;
       $('#alertLog').insertAdjacentHTML('afterbegin', `<li><span class="num">${clock(Date.now())}</span> ${esc(msg)}</li>`);
       return;
     }
     // approaching a planet line that squares with time today
     const today = Math.floor(CTX.last.t / DAY), ref = CTX.last.c;
-    for (const w of SIG.watch) {
-      if (Math.floor(w.t / DAY) !== today) continue;
-      const k = `${S.sym}|${w.P}|${w.off}|${today}`;
-      if (!AL.near.has(k) && Math.abs(w.v - ref) / ref <= S.so.touchPct * 3 / 100) {
+    for (const o of (SIG.pend && SIG.pend.list) || []) {
+      const k = `${S.sym}|${o.setup}|${o.dir}|${o.p.toFixed(2)}`;
+      if (!AL.near.has(k) && Math.abs(o.dist) <= Math.max(0.0015, S.tolPct / 200)) {
         AL.near.add(k); beep('near');
-        const msg = `${S.sym} يقترب من خط ${PL[w.P][1]} ${fmtP(w.v)} وهو متربع مع الزمن اليوم`;
+        const msg = `${S.sym} عند مستوى ${o.dir > 0 ? 'شراء' : 'بيع'}: ${o.note} ${fmtP(o.p)}`;
         toast(msg); $('#alertLog').insertAdjacentHTML('afterbegin', `<li><span class="num">${clock(Date.now())}</span> ${esc(msg)}</li>`);
       }
     }
@@ -1116,79 +1115,68 @@
   const SIG = { list: [], all: [], live: null, watch: [], stat: null, hot: [], hotTop: [], hotMax: 1 };
   const SQ_N = { plan: 'زمن الكوكب', bal1: 'توازن 1×1', sq9: 'زاوية مربع ٩', sq9o: 'مقابلة مربع ٩', cyc: 'دورة/مربع زمن', pdeg: 'السعر كدرجات' };
   const sqText = sq => sq && sq.list.length ? sq.list.map(k => SQ_N[k]).join(' + ') : 'بدون تربيع';
-  function soOpts() { return Object.assign({}, S.so, { win: S.so.win }); }
+  const SETUP_N = { dbl: 'قاع/قمة مزدوجة', tpl: 'قاع/قمة ثلاثية', ret: 'ارتداد 3/8–5/8', brk: 'كسر آخر قمة/قاع' };
+  const setupName = s => s.setup === 'dbl' ? (s.dir > 0 ? 'قاع مزدوج' : 'قمة مزدوجة') : s.setup === 'tpl' ? (s.dir > 0 ? 'قاع ثلاثي' : 'قمة ثلاثية') : s.setup === 'ret' ? `ارتداد ${(s.ratio * 100).toFixed(0)}%` : (s.dir > 0 ? 'كسر آخر قمة' : 'كسر آخر قاع');
+  const STRAT_SHORT = id => META[id] ? META[id][0] : id;
+  function confText(s) {
+    const t = [...new Set(s.time.hits.map(e => e.s))].map(STRAT_SHORT);
+    if (s.sq && s.sq.list.length) t.push('السعر = الزمن');
+    const p = s.price.strats.map(STRAT_SHORT);
+    return { time: t, price: p };
+  }
+  function soOpts() { return Object.assign({}, S.so, { tolPct: S.tolPct, win: Math.max(1, S.win) }); }
   function computeSignals() {
-    const so = soOpts();
-    so.useMainFrom = S.anchorLocked ? CTX.n - 5 : null;
-    const GR = { A: 3, B: 2, C: 1 }, gmin = GR[S.so.minGrade] || 1;
-    SIG.all = SC.signals(CTX, so, 0);
-    SC.simulate(CTX, SIG.all, S.so.hold);
-    SIG.list = SIG.all.filter(s => GR[s.grade] >= gmin);
+    const so = soOpts(), GR = { A: 3, B: 2, C: 1 }, gmin = GR[S.so.minGrade] || 1;
+    const r = SC.gannTrades(CTX, so, id => !!S.on[id]);
+    SIG.all = r.list; SIG.swings = r.swings;
+    SIG.list = SIG.all.filter(s => GR[s.grade] >= gmin && S.so['set' + (s.setup === 'tpl' ? 'Dbl' : s.setup[0].toUpperCase() + s.setup.slice(1))] !== false);
     const lastI = CTX.n - 1;
     SIG.live = SIG.list.filter(s => s.i >= lastI - 1).sort((a, b) => b.score - a.score)[0] || null;
-    // watch plan: the next time each nearby planet line squares with time from the anchor
+    SIG.open = SIG.list.filter(s => s.res.kind === 'open');
+    SIG.pend = SC.pendingSetups(CTX, so, r.swings);
     SIG.watch = [];
-    const m = CTX.main, ref = CTX.last.c, cyc = 360 * CTX.pf, offs = S.harm ? [0, 90, 180, 270] : [0];
-    const end = CTX.n + CTX.futN;
-    for (const P of S.planets) for (const off of offs) {
-      const L0 = G.lon(P, CTX.last.t, S.helio); if (L0 == null) continue;
-      const base = G.mod(L0 + off, 360) * CTX.pf;
-      for (const m2 of [Math.floor((ref - base) / cyc), Math.ceil((ref - base) / cyc)]) {
-        const v0 = base + m2 * cyc; if (Math.abs(v0 - ref) / ref > 0.06) continue;
-        for (let j = CTX.n; j < end; j++) {
-          const Lj = G.lon(P, CTX.daily ? CTX.T[j] + DAY / 2 : CTX.T[j], S.helio);
-          let v = G.mod(Lj + off, 360) * CTX.pf + m2 * cyc; if (Math.abs(v - v0) > cyc / 2) v += (v < v0 ? cyc : -cyc);
-          const sq = SC.squareState(CTX, m, j, v, so);
-          if (sq && (sq.bal1 || sq.sq9)) { SIG.watch.push({ P, off, v, v0, t: CTX.T[j], j, sq }); break; }
-        }
-      }
-    }
-    SIG.watch.sort((a, b) => a.t - b.t);
-    SIG.watch = SIG.watch.filter((w, k, arr) => arr.findIndex(x => x.P === w.P && x.off === w.off && Math.abs(x.v0 - w.v0) < 1e-9) === k).slice(0, 10);
-    SIG.stat = { all: SC.stats(SIG.list), A: SC.stats(SIG.all.filter(s => s.grade === 'A')), B: SC.stats(SIG.all.filter(s => s.grade === 'B')), C: SC.stats(SIG.all.filter(s => s.grade === 'C')) };
-    // compare: same touches without any squaring requirement → does squaring add value?
-    if (S.so.requireSq) { const base = SC.signals(CTX, Object.assign({}, so, { requireSq: false }), 0); SC.simulate(CTX, base, S.so.hold); SIG.stat.touchOnly = SC.stats(base.filter(s => s.grade === 'C')); }
+    const st = l => SC.stats(l);
+    SIG.stat = { all: st(SIG.list), A: st(SIG.all.filter(s => s.grade === 'A')), B: st(SIG.all.filter(s => s.grade === 'B')), C: st(SIG.all.filter(s => s.grade === 'C')) };
+    SIG.bySetup = ['dbl', 'tpl', 'ret', 'brk'].map(k => ({ k, s: st(SIG.all.filter(x => x.setup === k)) })).filter(x => x.s.n || x.s.open);
   }
-  function nearestLines() {
-    const ref = CTX.last.c, cyc = 360 * CTX.pf, offs = S.harm ? [0, 90, 180, 270] : [0], out = [];
-    for (const P of S.planets) { const L = G.lon(P, Date.now(), S.helio); if (L == null) continue; for (const off of offs) { const base = G.mod(L + off, 360) * CTX.pf; for (let k = -1; k <= 1; k++) { const v = base + (Math.round((ref - base) / cyc) + k) * cyc; out.push({ P, off, v, d: (v - ref) / ref }); } } }
-    const up = out.filter(x => x.d > 0).sort((a, b) => a.d - b.d)[0], dn = out.filter(x => x.d <= 0).sort((a, b) => b.d - a.d)[0];
-    return { up, dn };
+  function tradeCard(s, title) {
+    const buy = s.dir > 0, cf = confText(s), rr = Math.abs(s.t1 - s.entry) / s.risk;
+    const stopNow = s.res && s.res.kind === 'open' ? s.res.stopNow : s.stop;
+    return `<div class="sig-h"><span class="pill ${buy ? 'up' : 'down'}">${title} ${buy ? 'شراء' : 'بيع'} ${s.grade}</span><b>${setupName(s)} عند <span class="num">${fmtP(s.setup === 'brk' && s.level ? s.level.p : s.base.p)}</span>${s.setup === 'brk' ? ` <small style="color:var(--muted)">· الوقف تحت ${s.dir > 0 ? 'آخر قاع' : 'آخر قمة'} ${fmtP(s.base.p)}</small>` : ''}</b><small>${fd(s.t)}</small></div>
+      <div class="sig-g">
+        <div><span>الدخول</span><b class="num">${fmtP(s.entry)}</b></div>
+        <div><span>وقف الخسارة${stopNow !== s.stop ? ' (متحرك)' : ''}</span><b class="num side-r">${fmtP(stopNow)}</b></div>
+        <div><span>الهدف 1</span><b class="num side-s">${fmtP(s.t1)}</b></div>
+        <div><span>الهدف 2 (مربع ٩ ${buy ? '+' : '−'}180°)</span><b class="num side-s">${fmtP(s.t2)}</b></div>
+        <div><span>العائد/المخاطرة</span><b class="num">${rr.toFixed(2)}</b></div>
+        <div><span>مع الاتجاه</span><b>${s.withTrend ? 'نعم' : 'لا (انعكاس)'}</b></div>
+      </div>
+      <p class="sig-x"><b>تأكيد الزمن:</b> ${cf.time.length ? cf.time.join('، ') : 'لا يوجد'} · <b>تأكيد السعر:</b> ${cf.price.length ? cf.price.join('، ') : 'لا يوجد'}${s.res && s.res.kind === 'open' ? ` · <b>الآن:</b> <span class="num">${s.res.R >= 0 ? '+' : ''}${s.res.R.toFixed(2)}R</span>` : ''}</p>`;
   }
   function renderSignals() {
-    const live = SIG.live, box = $('#sigNow'), c = CTX;
-    const statCard = (k, st, nm) => `<div class="st"><div class="k">${nm}</div><div class="v num ${st.exp > 0 ? 'side-s' : st.n ? 'side-r' : ''}">${st.n ? (st.exp >= 0 ? '+' : '') + st.exp.toFixed(2) + 'R' : '—'}</div><div class="s">${st.n} صفقة · ربح ${(st.win * 100).toFixed(0)}% · PF ${isFinite(st.pf) ? st.pf.toFixed(2) : '∞'}</div></div>`;
-    if (live) {
-      const buy = live.dir > 0;
-      box.className = 'sig-now ' + (buy ? 'buy' : 'sell');
-      box.innerHTML = `<div class="sig-h"><span class="pill ${buy ? 'up' : 'down'}">${buy ? 'إشارة شراء' : 'إشارة بيع'} ${live.grade}</span><b>السعر لمس خط ${glyph(live.P)} ${PL[live.P][1]}${live.off ? ` ⁦+${live.off}°⁩` : ''} عند <span class="num">${fmtP(live.v)}</span></b><small>${fd(live.t)}</small></div>
-        <div class="sig-g">
-          <div><span>الدخول</span><b class="num">${fmtP(live.entry)}</b></div>
-          <div><span>وقف الخسارة</span><b class="num side-r">${fmtP(live.stop)}</b></div>
-          <div><span>الهدف 1 (مربع ٩ ${buy ? '+' : '−'}90°)</span><b class="num side-s">${fmtP(live.t1)}</b></div>
-          <div><span>الهدف 2 (${buy ? '+' : '−'}180°)</span><b class="num side-s">${fmtP(live.t2)}</b></div>
-          <div><span>العائد/المخاطرة</span><b class="num">${(Math.abs(live.t1 - live.entry) / live.risk).toFixed(2)}</b></div>
-          <div><span>التربيع</span><b>${sqText(live.sq)}</b></div>
-        </div>
-        <p class="sig-x">من ${live.a.type === 'H' ? 'قمة' : 'قاع'} <span class="num">${fmtP(live.a.p)}</span> مضى <span class="num">${live.sq.e.toFixed(1)}</span> ${S.timeMode === 'bar' ? 'شمعة' : 'يوم'} وقطع السعر <span class="num">${live.sq.units.toFixed(1)}</span> وحدة (نسبة <span class="num">${live.sq.bal.toFixed(2)}</span>) · زاوية السعر <span class="num">${live.sq.dP.toFixed(1)}°</span> وزاوية الزمن <span class="num">${live.sq.dT.toFixed(1)}°</span>.</p>`;
-    } else {
-      const nl = nearestLines();
+    const live = SIG.live || SIG.open[SIG.open.length - 1], box = $('#sigNow'), c = CTX;
+    const statCard = (st, nm) => `<div class="st"><div class="k">${nm}</div><div class="v num ${st.exp > 0 ? 'side-s' : st.n ? 'side-r' : ''}">${st.n ? (st.exp >= 0 ? '+' : '') + st.exp.toFixed(2) + 'R' : '—'}</div><div class="s">${st.n} صفقة · ربح ${(st.win * 100).toFixed(0)}% · PF ${isFinite(st.pf) ? st.pf.toFixed(2) : '∞'}</div></div>`;
+    const P = SIG.pend, trendTxt = P.trend > 0 ? 'صاعد' : P.trend < 0 ? 'هابط' : 'غير محدد';
+    if (live) { box.className = 'sig-now ' + (live.dir > 0 ? 'buy' : 'sell'); box.innerHTML = tradeCard(live, SIG.live ? 'إشارة جديدة:' : 'صفقة مفتوحة:'); }
+    else {
       box.className = 'sig-now idle';
-      box.innerHTML = `<div class="sig-h"><span class="pill nt">لا توجد صفقة الآن</span><b>الماسح يراقب لمس خطوط الكواكب مع تربيع السعر بالزمن</b></div>
-        <div class="sig-g">
-          <div><span>أقرب خط فوق السعر</span><b>${nl.up ? `${glyph(nl.up.P)} ${PL[nl.up.P][1]} <span class="num">${fmtP(nl.up.v)}</span> <small class="num">${pct(nl.up.d)}</small>` : '—'}</b></div>
-          <div><span>أقرب خط تحت السعر</span><b>${nl.dn ? `${glyph(nl.dn.P)} ${PL[nl.dn.P][1]} <span class="num">${fmtP(nl.dn.v)}</span> <small class="num">${pct(nl.dn.d)}</small>` : '—'}</b></div>
-        </div>`;
+      box.innerHTML = `<div class="sig-h"><span class="pill ${P.trend > 0 ? 'up' : P.trend < 0 ? 'down' : 'nt'}">الاتجاه حسب جان: ${trendTxt}</span><b>لا توجد صفقة الآن · الماسح ينتظر أحد إعدادات جان</b></div>
+        <div class="sig-g"><div><span>آخر قمة تأرجح</span><b class="num">${P.lastTop ? fmtP(P.lastTop.p) : '—'}</b></div><div><span>آخر قاع تأرجح</span><b class="num">${P.lastBot ? fmtP(P.lastBot.p) : '—'}</b></div></div>`;
     }
-    $('#sigWatch').innerHTML = SIG.watch.length ? `<table><thead><tr><th>التاريخ</th><th>الخط</th><th>سعر الخط يومها</th><th>المسافة الآن</th><th>نوع التربيع</th></tr></thead><tbody>${SIG.watch.map(w => `<tr><td>${fd(w.t)}<small style="color:var(--faint);display:block">+${Math.round((w.t - c.last.t) / DAY)} يوم</small></td><td><span style="color:var(--pl-${w.P})">${glyph(w.P)}</span> ${PL[w.P][1]}${w.off ? ` ⁦+${w.off}°⁩` : ''}</td><td class="num">${fmtP(w.v)}</td><td class="num ${w.v > c.last.c ? 'side-r' : 'side-s'}">${pct((w.v - c.last.c) / c.last.c)}</td><td>${sqText(w.sq)}</td></tr>`).join('')}</tbody></table>` : `<div class="empty">لا يوجد خط كوكبي قريب (±6%) يتربع مع الزمن داخل أفق المسح. زد الأفق أو فعّل كواكب أخرى.</div>`;
+    $('#sigWatch').innerHTML = P.list.length ? `<table><thead><tr><th>الإعداد</th><th>المستوى</th><th>المسافة</th><th>الدخول يحدث عندما</th></tr></thead><tbody>${P.list.map(o => {
+      const how = o.setup === 'brk' ? 'يغلق السعر خلف المستوى' : o.setup === 'dbl' ? `يصل السعر للمستوى ثم يتحول التأرجح ${o.dir > 0 ? 'صعودًا' : 'هبوطًا'} (شمعتان)` : `يرتد السعر للمستوى ثم يتحول التأرجح ${o.dir > 0 ? 'صعودًا' : 'هبوطًا'}`;
+      return `<tr><td><span class="pill ${o.dir > 0 ? 'up' : 'down'}">${o.dir > 0 ? 'شراء' : 'بيع'}</span> ${o.note}</td><td class="num">${fmtP(o.p)}</td><td class="num ${o.dist > 0 ? 'side-r' : 'side-s'}">${pct(o.dist)}</td><td style="font-size:.8rem;color:var(--muted)">${how}</td></tr>`;
+    }).join('')}</tbody></table>` : `<div class="empty">لا توجد إعدادات قريبة (±8%) من السعر.</div>`;
     const st = SIG.stat;
-    $('#sigStats').innerHTML = statCard('all', st.all, `الإشارات المعتمدة (${S.so.minGrade === 'C' ? 'الكل' : S.so.minGrade === 'B' ? 'B وأعلى' : 'A فقط'})`) + statCard('A', st.A, 'الدرجة A') + statCard('B', st.B, 'الدرجة B') + (st.touchOnly ? statCard('t', st.touchOnly, 'لمس بدون تربيع (للمقارنة)') : statCard('C', st.C, 'الدرجة C'));
-    const rows = SIG.list.slice().reverse().slice(0, 60);
+    $('#sigStats').innerHTML = statCard(st.all, `الإشارات المعتمدة (${S.so.minGrade === 'C' ? 'الكل' : S.so.minGrade === 'B' ? 'B وأعلى' : 'A فقط'})`) + statCard(st.A, 'الدرجة A') + statCard(st.B, 'الدرجة B') + statCard(st.C, 'الدرجة C')
+      + (SIG.bySetup || []).map(x => statCard(x.s, SETUP_N[x.k])).join('');
+    const rows = SIG.list.slice().reverse().slice(0, 80);
     $('#sigBody').innerHTML = rows.length ? rows.map(s => {
-      const r = s.res, rk = r.kind === 'target' ? ['side-s', 'الهدف'] : r.kind === 'stop' ? ['side-r', 'الوقف'] : r.kind === 'time' ? ['', 'انتهاء المدة'] : ['', 'مفتوحة'];
-      return `<tr><td style="white-space:nowrap">${fd(s.t)}</td><td><span class="pill ${s.dir > 0 ? 'up' : 'down'}">${s.dir > 0 ? 'شراء' : 'بيع'} ${s.grade}</span></td><td><span style="color:var(--pl-${s.P})">${glyph(s.P)}</span> ${PL[s.P][1]}${s.off ? ` ⁦+${s.off}°⁩` : ''} <span class="num">${fmtP(s.v)}</span></td><td style="font-size:.8rem">${sqText(s.sq)}</td><td class="num">${fmtP(s.entry)}</td><td class="num side-r">${fmtP(s.stop)}</td><td class="num side-s">${fmtP(s.t1)}</td><td class="num ${rk[0]}">${rk[1]} ${r.R >= 0 ? '+' : ''}${r.R.toFixed(2)}R</td></tr>`;
-    }).join('') : `<tr><td colspan="8"><div class="empty">لا توجد إشارات بهذه القواعد في البيانات الحالية.</div></td></tr>`;
-    $('#sigSub').textContent = `${SIG.list.length} إشارة · احتفاظ حتى ${S.so.hold} شمعة`;
+      const r = s.res, rk = r.kind === 'target' ? ['side-s', 'الهدف'] : r.kind === 'stop' ? ['side-r', 'الوقف'] : r.kind === 'trail' ? [r.R >= 0 ? 'side-s' : 'side-r', 'الوقف المتحرك'] : r.kind === 'time' ? ['', 'انتهاء المدة'] : ['', 'مفتوحة'];
+      const cf = confText(s);
+      return `<tr><td style="white-space:nowrap">${fd(s.t)}</td><td><span class="pill ${s.dir > 0 ? 'up' : 'down'}">${s.dir > 0 ? 'شراء' : 'بيع'} ${s.grade}</span></td><td>${setupName(s)} <span class="num">${fmtP(s.setup === 'brk' && s.level ? s.level.p : s.base.p)}</span></td><td style="font-size:.78rem;color:var(--muted)">${[...cf.time, ...cf.price].slice(0, 4).join('، ') || '—'}</td><td class="num">${fmtP(s.entry)}</td><td class="num side-r">${fmtP(s.stop)}</td><td class="num side-s">${fmtP(s.t1)}</td><td class="num ${rk[0]}">${rk[1]} ${r.R >= 0 ? '+' : ''}${r.R.toFixed(2)}R</td></tr>`;
+    }).join('') : `<tr><td colspan="8"><div class="empty">لا توجد صفقات بهذه القواعد في البيانات الحالية.</div></td></tr>`;
+    $('#sigSub').textContent = `${SIG.all.length} صفقة · الخروج: ${S.so.exitMode === 'target' ? 'هدف ثابت' : 'وقف متحرك تحت القيعان'}`;
   }
 
   /* ================= LIVE DATA (GannData providers) ================= */
@@ -1284,19 +1272,20 @@
   function scanOne(bars) {
     const o = { pivK: S.pivK, anchorI: null, anchorMode: 'main', timeMode: S.timeMode, unit: 0, sqk: 0, pf: 0, horizon: S.horizon, harm: S.harm, helio: S.helio, planets: S.planets.slice(), tolPct: S.tolPct, win: Math.max(1, S.win), ptPlanet: S.ptPlanet, boxN: S.boxN };
     const c = SC.build(bars, o); if (!c.main) return { st: 'err', msg: 'قمم وقيعان غير كافية' };
-    const so = soOpts(); const sg = SC.signals(c, so, Math.max(0, c.n - 120));
-    const lastSig = sg.filter(s => s.i >= c.n - 3).sort((a, b) => b.score - a.score)[0] || null;
+    const so = soOpts(), GR = { A: 3, B: 2, C: 1 }; const rr = SC.gannTrades(c, so, id => !!S.on[id]); const sg = rr.list.filter(s => GR[s.grade] >= (GR[S.so.minGrade] || 1));
+    const lastSig = sg.filter(s => s.i >= c.n - 3).sort((a, b) => b.score - a.score)[0] || sg.filter(s => s.res.kind === 'open').pop() || null;
+    const pend = SC.pendingSetups(c, so, rr.swings).list[0] || null;
     const ref = c.last.c, cyc = 360 * c.pf; let near = null;
     for (const P of S.planets) { const L = G.lon(P, c.last.t, S.helio); if (L == null) continue; for (const off of (S.harm ? [0, 90, 180, 270] : [0])) { const base = G.mod(L + off, 360) * c.pf, v = base + Math.round((ref - base) / cyc) * cyc; const d = (v - ref) / ref; if (!near || Math.abs(d) < Math.abs(near.d)) near = { P, off, v, d, sq: SC.squareState(c, c.main, c.n - 1, v, so) }; } }
     const pc = bars[bars.length - 2].c;
-    return { c: ref, ch: (ref - pc) / pc, sig: lastSig, near, dig: digitsFor(ref), bars };
+    return { c: ref, ch: (ref - pc) / pc, sig: lastSig, near, pend, dig: digitsFor(ref), bars };
   }
   function renderScan() {
     $('#msBody').innerHTML = MS.rows.length ? MS.rows.map((r, k) => {
       if (r.st !== 'ok') return `<tr><td><b>${esc(r.s)}</b></td><td colspan="5" style="color:var(--faint)">${r.st === 'wait' ? 'في الانتظار' : r.st === 'load' ? 'جارٍ الجلب والحساب…' : esc(r.msg || 'خطأ')}</td></tr>`;
       const f = p => p.toLocaleString('en-US', { minimumFractionDigits: r.dig, maximumFractionDigits: r.dig });
-      const sig = r.sig ? `<span class="pill ${r.sig.dir > 0 ? 'up' : 'down'}">${r.sig.dir > 0 ? 'شراء' : 'بيع'} ${r.sig.grade}</span> ${glyph(r.sig.P)}` : '<span class="pill nt">لا شيء</span>';
-      const sq = r.near && r.near.sq && r.near.sq.list.length ? `<span class="tag" style="color:var(--accent)">${sqText(r.near.sq)}</span>` : '<span style="color:var(--faint)">غير متربع</span>';
+      const sig = r.sig ? `<span class="pill ${r.sig.dir > 0 ? 'up' : 'down'}">${r.sig.dir > 0 ? 'شراء' : 'بيع'} ${r.sig.grade}</span> ${setupName(r.sig)}${r.sig.res.kind === 'open' && r.sig.i < r.bars.length - 3 ? ' (مفتوحة)' : ''}` : '<span class="pill nt">لا شيء</span>';
+      const sq = r.pend ? `${r.pend.dir > 0 ? 'شراء' : 'بيع'}: ${r.pend.note} <span class="num">${f(r.pend.p)}</span> <small class="num">${pct(r.pend.dist)}</small>` : '<span style="color:var(--faint)">—</span>';
       return `<tr class="ms-row" data-k="${k}" tabindex="0"><td><b>${esc(r.s)}</b></td><td class="num">${f(r.c)} <small class="num ${r.ch >= 0 ? 'side-s' : 'side-r'}">${pct(r.ch)}</small></td><td>${sig}</td><td>${r.near ? `<span style="color:var(--pl-${r.near.P})">${glyph(r.near.P)}</span> <span class="num">${f(r.near.v)}</span> <small class="num">${pct(r.near.d)}</small>` : '—'}</td><td>${sq}</td><td><button class="mini-btn" type="button" data-open="${k}">فتح</button></td></tr>`;
     }).join('') : `<tr><td colspan="6"><div class="empty">اكتب الرموز ثم اضغط «ابدأ المسح». الخطة المجانية لـ Twelve Data تسمح بـ 8 طلبات في الدقيقة، لذلك يمر الماسح على رمز كل 8 ثوانٍ تقريبًا.</div></td></tr>`;
   }
@@ -1323,13 +1312,15 @@
       S.so[sw.dataset.so] = !S.so[sw.dataset.so]; syncSig(); refresh(true);
     });
     const num = (id, key, lo, hi) => { $(id).onchange = e => { let v = parseFloat(e.target.value); if (!isFinite(v)) v = DEF.so[key]; S.so[key] = Math.min(hi, Math.max(lo, v)); e.target.value = S.so[key]; refresh(true); }; };
-    num('#soTouch', 'touchPct', 0.02, 1); num('#soDeg', 'degTol', 1, 20); num('#soBal', 'balTol', 0.02, 0.5); num('#soStop', 'stopAtr', 0, 3); num('#soRR', 'minRR', 0.5, 5); num('#soHold', 'hold', 3, 200);
+    num('#soDbl', 'dblAtr', 0.1, 2); num('#soMaxRisk', 'maxRiskAtr', 1, 10); num('#soDeg', 'degTol', 1, 20); num('#soBal', 'balTol', 0.02, 0.5); num('#soStop', 'stopAtr', 0, 3); num('#soRR', 'minRR', 0.5, 5); num('#soHold', 'hold', 3, 300); num('#soTimeMin', 'timeMin', 0.5, 10); num('#soPriceMin', 'priceMin', 1, 6);
+    $('#soExit').onchange = e => { S.so.exitMode = e.target.value; refresh(true); };
+    $('#soSwing').onchange = e => { S.so.swingN = +e.target.value; refresh(true); };
     $('#soGrade').onchange = e => { S.so.minGrade = e.target.value; refresh(true); };
     syncSig();
   }
   function syncSig() {
     $$('[data-so]').forEach(b => b.setAttribute('aria-checked', !!S.so[b.dataset.so]));
-    $('#soTouch').value = S.so.touchPct; $('#soDeg').value = S.so.degTol; $('#soBal').value = S.so.balTol; $('#soStop').value = S.so.stopAtr; $('#soRR').value = S.so.minRR; $('#soHold').value = S.so.hold; $('#soGrade').value = S.so.minGrade;
+    $('#soDbl').value = S.so.dblAtr; $('#soMaxRisk').value = S.so.maxRiskAtr; $('#soTimeMin').value = S.so.timeMin; $('#soPriceMin').value = S.so.priceMin; $('#soExit').value = S.so.exitMode; $('#soSwing').value = String(S.so.swingN); $('#soDeg').value = S.so.degTol; $('#soBal').value = S.so.balTol; $('#soStop').value = S.so.stopAtr; $('#soRR').value = S.so.minRR; $('#soHold').value = S.so.hold; $('#soGrade').value = S.so.minGrade;
   }
 
   /* ---------- boot ---------- */
