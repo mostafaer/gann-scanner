@@ -8,7 +8,10 @@
   const G = root.GannEngine;
   const KEY_STORE = 'gann-scanner.tdkey';
   const TF = {
+    '3min': { bn: '3m', td: '1min', build: true, ms: 3 * 6e4, poll: 60e3 },
+    '5min': { bn: '5m', td: '5min', ms: 5 * 6e4, poll: 60e3 },
     '15min': { bn: '15m', td: '15min', ms: 15 * 6e4, poll: 60e3 },
+    '30min': { bn: '30m', td: '30min', ms: 30 * 6e4, poll: 90e3 },
     '1h': { bn: '1h', td: '1h', ms: 36e5, poll: 120e3 },
     '4h': { bn: '4h', td: '4h', ms: 4 * 36e5, poll: 300e3 },
     '1day': { bn: '1d', td: '1day', ms: 864e5, poll: 600e3 },
@@ -35,7 +38,7 @@
   function route(sym, hasClaude) {
     const s = String(sym).trim().toUpperCase();
     // inside claude.ai the page may only reach the viewer's connector (direct fetches are blocked)
-    if (hasClaude) return { provider: 'claude', id: s, label: `${s} · Twelve Data` };
+    if (hasClaude) return { provider: 'claude', id: s, label: `${s} · Twelve Data`, session: !!METALS[s] || FOREX.test(s) };
     let m = s.match(/^([A-Z0-9]{2,12})[\/\-]?(USDT|USDC|FDUSD)$/);
     if (m) return { provider: 'binance', id: m[1] + m[2], label: `${m[1]}/${m[2]} · Binance` };
     m = s.match(/^([A-Z0-9]{2,12})\/(USD|BTC|ETH)$/);
@@ -46,6 +49,12 @@
     const metal = METALS[s];
     const id = metal ? (s.includes('/') ? s : s.slice(0, 3) + '/' + s.slice(3)) : s;
     return { provider: 'twelve', id, label: `${id} · Twelve Data`, session: !!metal || FOREX.test(id), live: metal || null };
+  }
+  /* metals/forex providers keep sending flat candles while the market is closed (weekend, daily break);
+     TradingView shows nothing there, so they are dropped */
+  function openOnly(bars, r) {
+    if (!r || !r.session) return bars;
+    return bars.filter(b => SES.isOpen(b.t) || b.h !== b.l);
   }
   /* when the candle that started at t closes, and whether the market is open (metals/forex sessions) */
   function barClose(t, tf, r) { return SES.closeOf(t, tf, !!(r && r.session)); }
@@ -72,12 +81,19 @@
     let ws = null, stopped = false, tries = 0, timer = null;
     const open = () => {
       if (stopped) return;
-      ws = new WebSocket(`${BN_WS}${id.toLowerCase()}@kline_${TF[tf].bn}`);
+      const lid = id.toLowerCase();
+      ws = new WebSocket(`${BN_WS.replace('/ws/', '/stream?streams=')}${lid}@kline_${TF[tf].bn}/${lid}@aggTrade`);
       ws.onopen = () => { tries = 0; onState('open'); };
+      let cur = null;
       ws.onmessage = ev => {
         try {
-          const k = JSON.parse(ev.data).k; if (!k) return;
-          onKline({ t: k.t, o: +k.o, h: +k.h, l: +k.l, c: +k.c, v: +k.v, closed: k.x });
+          const m = JSON.parse(ev.data), d = m.data || m;
+          if (d.k) { const k = d.k; cur = { t: k.t, o: +k.o, h: +k.h, l: +k.l, c: +k.c, v: +k.v, closed: k.x }; onKline(cur); }
+          else if (d.e === 'aggTrade' && cur) { // every trade moves the live candle immediately
+            const p = +d.p; if (!(p > 0)) return;
+            if (d.T >= cur.t + TF[tf].ms) return; // belongs to the next candle; the kline event will open it
+            cur = Object.assign({}, cur, { c: p, h: Math.max(cur.h, p), l: Math.min(cur.l, p) }); onKline(cur);
+          }
         } catch (e) { }
       };
       ws.onclose = () => { if (stopped) return; onState('closed'); const wait = Math.min(30e3, 1000 * Math.pow(2, tries++)) + Math.random() * 500; timer = setTimeout(open, wait); };
@@ -118,8 +134,9 @@
   }
   async function tdBars(id, tf, size, r) {
     if (r && r.session && (tf === '4h' || tf === '1day' || tf === '1week')) return tdSessionBars(id, tf, r);
-    const j = await tdGet('time_series', { symbol: id, interval: TF[tf].td, outputsize: String(size || 1000), timezone: 'UTC', order: 'ASC' });
-    const bars = tdValuesToBars(j.values || []);
+    const j = await tdGet('time_series', { symbol: id, interval: TF[tf].td, outputsize: String(TF[tf].build ? 5000 : (size || 1000)), timezone: 'UTC', order: 'ASC' });
+    let bars = openOnly(tdValuesToBars(j.values || []), r);
+    if (TF[tf].build) bars = SES.aggregate(bars, tf, false);
     if (bars.length < 40) throw new DataError('short', `بيانات ${id} قليلة (${bars.length} شمعة).`);
     return { bars, meta: { provider: 'twelve', decimals: decimalsOf((j.values || []).slice(-50).map(v => v.close)), exchange: j.meta && j.meta.exchange, type: j.meta && j.meta.type } };
   }
@@ -131,12 +148,12 @@
       src = tdValuesToBars(j.values || []).map(b => Object.assign(b, { t: b.t + 23 * 36e5 })); // a UTC daily bar ≈ the session that ends that day
     } else {
       const j1 = await tdGet('time_series', { symbol: id, interval: '1h', outputsize: '5000', timezone: 'UTC', order: 'ASC' });
-      src = tdValuesToBars(j1.values || []);
+      src = openOnly(tdValuesToBars(j1.values || []), r);
       if (tf === '1day' && src.length) { // one more page for a longer daily history
         try {
           const end = new Date(src[0].t - 36e5).toISOString().slice(0, 19).replace('T', ' ');
           const j2 = await tdGet('time_series', { symbol: id, interval: '1h', outputsize: '5000', timezone: 'UTC', order: 'ASC', end_date: end });
-          src = tdValuesToBars([...(j2.values || []), ...(j1.values || [])]);
+          src = openOnly(tdValuesToBars([...(j2.values || []), ...(j1.values || [])]), r);
         } catch (e) { }
       }
     }
@@ -149,9 +166,18 @@
     let ws = null, stopped = false, tries = 0, timer = null, alive = 0;
     const open = () => {
       if (stopped) return;
-      try { ws = new WebSocket(`${BNF_WS}${pair}@markPrice@1s`); } catch (e) { onState('fail'); return; }
+      try { ws = new WebSocket(`${BNF_WS.replace('/ws/', '/stream?streams=')}${pair}@markPrice@1s/${pair}@bookTicker`); } catch (e) { onState('fail'); return; }
       ws.onopen = () => { tries = 0; onState('open'); };
-      ws.onmessage = ev => { try { const m = JSON.parse(ev.data); const i = +m.i; if (i > 0) { alive = Date.now(); onPrice(i, m.E || Date.now()); } } catch (e) { } };
+      // index = spot gold (every 1 s); bookTicker = best bid/ask of the gold contract (every change, ms).
+      // price shown = contract mid + smoothed (index − mid), i.e. spot-level price at order-book speed
+      let mid = 0, basis = null;
+      ws.onmessage = ev => {
+        try {
+          const m = JSON.parse(ev.data), d = m.data || m;
+          if (d.e === 'markPriceUpdate') { const i = +d.i; if (!(i > 0)) return; if (mid > 0) basis = basis == null ? i - mid : basis * 0.8 + (i - mid) * 0.2; alive = Date.now(); onPrice(basis == null ? i : mid + basis, d.E || Date.now()); }
+          else if (d.b != null && d.a != null) { const b = +d.b, a = +d.a; if (b > 0 && a > 0) { mid = (a + b) / 2; if (basis != null) { alive = Date.now(); onPrice(mid + basis, d.E || d.T || Date.now()); } } }
+        } catch (e) { }
+      };
       ws.onclose = () => { if (stopped) return; onState(tries > 3 ? 'fail' : 'closed'); const wait = Math.min(30e3, 1000 * Math.pow(2, tries++)) + Math.random() * 500; timer = setTimeout(open, wait); };
       ws.onerror = () => { try { ws.close(); } catch (e) { } };
     };
@@ -181,8 +207,9 @@
   }
   async function claudeBars(mcp, id, tf, size) {
     let res;
-    try { res = await mcp.callTool('Twelve Data', 'get_time_series', { symbol: id, interval: TF[tf].td, outputsize: size || 1000 }, { cache: { staleTime: 60e3, gcTime: 30 * 60e3 } }); } catch (e) { throw claudeErr(e); }
+    try { res = await mcp.callTool('Twelve Data', 'get_time_series', { symbol: id, interval: TF[tf].td, outputsize: TF[tf].build ? 5000 : (size || 1000) }, { cache: { staleTime: 60e3, gcTime: 30 * 60e3 } }); } catch (e) { throw claudeErr(e); }
     const txt = payloadText(res), r = G.parseCSV(txt);
+    if (!r.error) { r.bars = openOnly(r.bars, { session: !!METALS[id] || FOREX.test(id) }); if (TF[tf].build) r.bars = SES.aggregate(r.bars, tf, false); }
     if (r.error) throw new DataError(/symbol|not found|invalid/i.test(txt) ? 'symbol' : 'short', /symbol|not found|invalid/i.test(txt) ? `الرمز ${id} غير موجود لدى المزود.` : r.error);
     return { bars: r.bars, meta: { provider: 'claude', decimals: null, storedAt: res.cache ? res.cache.storedAt : null } };
   }
@@ -264,7 +291,7 @@
           if (calib && last && Date.now() - histAt < 10 * 6e4) { const o = last.c - p; offset = Math.abs(o) / p < 0.005 ? o : 0; calib = false; }
           streamOk = true;
           tick(p + offset, at);
-          status('on', `لحظي كل ثانية · ${r.id} · مؤشر Binance مُعايَر على Twelve Data`);
+          status('on', `لحظي مع كل حركة · ${r.id} · Binance مُعايَر على السعر الفوري`);
         }, st => {
           if (st === 'open') return;
           if (st === 'fail') { streamOk = false; status('warn', 'البث اللحظي غير متاح من شبكتك — التحديث كل دقيقة من Twelve Data'); startQuotePoll(); }

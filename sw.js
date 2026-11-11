@@ -1,5 +1,5 @@
 /* Offline app shell. Market data (Binance, Twelve Data) always goes to the network. */
-const VERSION = 'gann-v1.4.0';
+const VERSION = 'gann-v1.5.0';
 const SHELL = [
   './', 'index.html', 'css/app.css', 'manifest.webmanifest',
   'js/core/engine.js', 'js/core/scanner.js', 'js/data/session.js', 'js/data/providers.js', 'js/data/sample-xau.js', 'js/app.js', 'js/pwa.js',

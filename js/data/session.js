@@ -14,11 +14,11 @@
     const p = {}; for (const x of NYF.formatToParts(new Date(t))) p[x.type] = x.value;
     return Date.UTC(+p.year, +p.month - 1, +p.day, +p.hour % 24, +p.minute) - Math.floor(t / 6e4) * 6e4;
   }
-  const PERIOD = { '15min': 15 * 6e4, '1h': H, '4h': 4 * H, '1day': DAY, '1week': 7 * DAY };
+  const PERIOD = { '3min': 3 * 6e4, '5min': 5 * 6e4, '15min': 15 * 6e4, '30min': 30 * 6e4, '1h': H, '4h': 4 * H, '1day': DAY, '1week': 7 * DAY };
   /* start time (UTC ms) of the candle that contains t; `session` = true for metals/forex */
   function bucket(t, tf, session) {
     const P = PERIOD[tf];
-    if (!session || tf === '15min' || tf === '1h') {
+    if (!session || PERIOD[tf] <= H) {
       if (tf === '1week') { const d = Math.floor(t / DAY) * DAY, wd = (new Date(d).getUTCDay() + 6) % 7; return d - wd * DAY; }
       return Math.floor(t / P) * P;
     }
@@ -30,7 +30,7 @@
   }
   /* when the candle starting at `start` closes (UTC ms) */
   function closeOf(start, tf, session) {
-    if (!session || tf === '15min' || tf === '1h') return start + PERIOD[tf];
+    if (!session || PERIOD[tf] <= H) return start + PERIOD[tf];
     if (tf === '4h') { const end = start + PERIOD[tf], s = sessionClose(start); return Math.min(end, s); }
     if (tf === '1day') return Date.UTC(new Date(start).getUTCFullYear(), new Date(start).getUTCMonth(), new Date(start).getUTCDate(), 17) - nyOffset(start + 17 * H);
     const fri = start + 4 * DAY; return Date.UTC(new Date(fri).getUTCFullYear(), new Date(fri).getUTCMonth(), new Date(fri).getUTCDate(), 17) - nyOffset(fri + 17 * H);

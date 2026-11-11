@@ -402,7 +402,7 @@
   const sec = t => Math.floor(t / 1000);
 
   const TVFONT = '-apple-system, BlinkMacSystemFont, "Trebuchet MS", Roboto, Ubuntu, sans-serif';
-  const TF_SHORT = { '15min': '15m', '1h': '1h', '4h': '4h', '1day': '1D', '1week': '1W' };
+  const TF_SHORT = { '3min': '3m', '5min': '5m', '30min': '30m', '15min': '15m', '1h': '1h', '4h': '4h', '1day': '1D', '1week': '1W' };
   function chartTheme() {
     return {
       layout: { background: { type: 'solid', color: css('--tv-bg') }, textColor: css('--tv-text'), fontFamily: TVFONT, fontSize: 12 },
@@ -574,7 +574,7 @@
     const mk = [];
     for (const p of c.piv) {
       const isMain = p === c.main;
-      if (!isMain && !lay('pivots')) continue;
+      if (!isMain && (!lay('pivots') || (!c.daily && c.step < 36e5))) continue;
       mk.push({ time: sec(p.t), position: p.type === 'H' ? 'aboveBar' : 'belowBar', shape: isMain ? 'circle' : (p.type === 'H' ? 'arrowDown' : 'arrowUp'), color: isMain ? css('--accent') : alpha(css('--muted'), p.tent ? 0.45 : 0.75), size: isMain ? 1.2 : 0.5, text: isMain ? 'محور' : '' });
     }
     const gmin = { A: 3, B: 2, C: 1 }[S.so.minGrade] || 1;
@@ -618,6 +618,7 @@
     // squaring windows for the anchor (price = time) as thin top ticks
     for (const q of SIG.watch) { const xq = x(SC.idxOfT(CTX, q.t)); if (xq == null) continue; octx.fillStyle = css('--pl-' + q.P); octx.beginPath(); octx.arc(xq, 16, 3, 0, Math.PI * 2); octx.fill(); }
     drawPro(octx, x, p => CHT.candle.priceToCoordinate(p), paneW, paneH);
+    drawTrades(octx, x, p => CHT.candle.priceToCoordinate(p), paneW, paneH);
     renderDrawings(octx, x, p => CHT.candle.priceToCoordinate(p), paneW, paneH);
     octx.restore();
   }
@@ -673,6 +674,7 @@
     it.push(row('curves', 'var(--accent)', 'منحنيات التربيع'));
     it.push(row('hot', 'var(--accent)', `نقاط الحسم ◆ ${(SIG.hotTop || []).length}`));
     if (S.on.box || S.on.boxt) it.push(row('box', 'var(--c-sq144)', 'صندوق جان ' + SC.boxSpan(CTX).label));
+    it.push(row('trades', 'var(--tv-up)', 'الصفقات (دخول/وقف/أهداف)'));
     it.push(row('zones', 'var(--down)', 'مناطق R/S'));
     it.push(row('hist', 'var(--accent)', 'ضغط الزمن'));
     if (CTX && CTX.bars.some(b => b.v > 0)) it.push(row('volume', 'var(--tv-muted)', 'الحجم'));
@@ -884,7 +886,7 @@
     ['planets', 'خطوط الكواكب'], ['curves', 'منحنيات التربيع (مربع ٩)'], ['hot', 'نقاط الحسم'], ['fan', 'مروحة جان'],
     ['levels', 'مستويات المحور'], ['zones', 'مناطق التلاقي R/S'], ['profile', 'ملف التلاقي على اليمين'], ['hist', 'ضغط الزمن (أسفل الرسم)'],
     ['windows', 'نوافذ الزمن'], ['sessions', 'جلسات آسيا/لندن/نيويورك'], ['pivots', 'القمم والقيعان'], ['sigs', 'أسهم الإشارات'],
-    ['ptime', 'زاوية زمن الكوكب'], ['box', 'صندوق جان'], ['volume', 'الحجم (العملات الرقمية)'],
+    ['trades', 'الصفقات: دخول ووقف وأهداف'], ['pend', 'مستويات الصفقات القادمة'], ['ptime', 'زاوية زمن الكوكب'], ['box', 'صندوق جان'], ['volume', 'الحجم (العملات الرقمية)'],
   ];
   const lay = k => (S.layers || {})[k] !== false;
   function initLayers() {
@@ -973,6 +975,77 @@
     }
   }
 
+
+  /* trades drawn like TradingView's Long/Short Position tool:
+     green box = reward (entry → target 1), red box = risk (entry → stop), dashed = target 2,
+     amber band = entry zone, label with the result. The active trade is bright; closed ones are faint. */
+  function drawTrades(ctx2, x, y, paneW, paneH) {
+    if (!lay('trades') || !SIG.list || !SIG.list.length) return;
+    const c = CTX, up = css('--tv-up'), dn = css('--tv-down'), amber = css('--c-sq9'), F = '600 11px ' + TVFONT, Fs = '11px ' + TVFONT;
+    const vr = CHT.chart.timeScale().getVisibleLogicalRange(); if (!vr) return;
+    const live = SIG.live || (SIG.open && SIG.open[SIG.open.length - 1]);
+    const shown = SIG.list.filter(s => { const j = s.res ? s.res.j : c.n - 1; return j >= vr.from - 2 && s.i <= vr.to + 2; }).slice(-8);
+    if (live && !shown.includes(live)) shown.push(live);
+    const tag = (txt, px, py, bg, align) => {
+      ctx2.font = F; const w = ctx2.measureText(txt).width + 10, h = 17;
+      py = Math.max(h / 2 + 2, Math.min(paneH - h / 2 - 2, py));
+      let lx0 = align === 'right' ? px - w : px; lx0 = Math.max(2, Math.min(paneW - w - 2, lx0));
+      ctx2.fillStyle = bg; ctx2.beginPath(); ctx2.roundRect ? ctx2.roundRect(lx0, py - h / 2, w, h, 3) : ctx2.rect(lx0, py - h / 2, w, h); ctx2.fill();
+      ctx2.fillStyle = '#fff'; ctx2.textAlign = 'left'; ctx2.textBaseline = 'middle'; ctx2.fillText(txt, lx0 + 5, py + 0.5);
+    };
+    for (const s of shown) {
+      const active = s === live || (s.res && s.res.kind === 'open');
+      if (!active) { // closed trade: entry → exit line, like TradingView's trade marks
+        const ex = s.res ? x(s.res.j) : null, xe = x(s.i), ye0 = y(s.entry), yx = s.res ? y(s.res.px) : null;
+        if (ex == null || xe == null || ye0 == null || yx == null) continue;
+        const col = s.res.R >= 0 ? up : dn;
+        ctx2.strokeStyle = alpha(col, 0.8); ctx2.lineWidth = 1.3; ctx2.setLineDash([4, 3]);
+        ctx2.beginPath(); ctx2.moveTo(xe, ye0); ctx2.lineTo(ex, yx); ctx2.stroke(); ctx2.setLineDash([]);
+        ctx2.fillStyle = alpha(col, 0.95); ctx2.beginPath(); ctx2.arc(ex, yx, 3.2, 0, Math.PI * 2); ctx2.fill();
+        ctx2.font = '600 10px ' + TVFONT; ctx2.textAlign = 'left'; ctx2.textBaseline = 'middle'; ctx2.fillText(`${s.res.R >= 0 ? '+' : ''}${s.res.R.toFixed(1)}R`, ex + 5, yx);
+        continue;
+      }
+      const a0 = 1;
+      const endJ = s.res && s.res.kind !== 'open' ? s.res.j : c.n - 1 + Math.max(6, Math.round((vr.to - vr.from) * 0.08));
+      const x0 = x(s.i), x1 = x(endJ + 0.5);
+      if (x0 == null || x1 == null) continue;
+      const ye = y(s.entry), ys = y(s.stop), y1 = y(s.t1), y2 = y(s.t2);
+      if (ye == null || ys == null || y1 == null) continue;
+      const w = Math.max(6, x1 - x0);
+      // risk and reward boxes
+      ctx2.fillStyle = alpha(dn, 0.16 * a0 + 0.04); ctx2.fillRect(x0, Math.min(ye, ys), w, Math.abs(ys - ye));
+      ctx2.fillStyle = alpha(up, 0.16 * a0 + 0.04); ctx2.fillRect(x0, Math.min(ye, y1), w, Math.abs(y1 - ye));
+      // entry zone (±0.25 ATR around the entry)
+      const za = y(s.entry + s.atr * 0.25), zb = y(s.entry - s.atr * 0.25);
+      if (za != null && zb != null) { ctx2.fillStyle = alpha(amber, 0.22 * a0 + 0.05); ctx2.fillRect(x0, Math.min(za, zb), w, Math.abs(zb - za)); }
+      ctx2.lineWidth = active ? 1.6 : 1;
+      const hl = (yy, col, dash) => { ctx2.strokeStyle = alpha(col, a0); ctx2.setLineDash(dash || []); ctx2.beginPath(); ctx2.moveTo(x0, yy); ctx2.lineTo(x0 + w, yy); ctx2.stroke(); ctx2.setLineDash([]); };
+      hl(ye, css('--tv-text')); hl(ys, dn); hl(y1, up);
+      if (y2 != null && active) hl(y2, up, [5, 4]);
+      // moving stop of the open trade
+      if (s.res && s.res.kind === 'open' && s.res.stopNow != null && Math.abs(s.res.stopNow - s.stop) > 1e-9) { const yt = y(s.res.stopNow); if (yt != null) { hl(yt, dn, [3, 3]); } }
+      {
+        const rx = x0 + w - 4, buy = s.dir > 0, rr = Math.abs(s.t1 - s.entry) / s.risk;
+        tag(`${s.provisional ? 'مبدئية · ' : ''}${buy ? 'شراء' : 'بيع'} ${s.grade} · دخول ${fmtP(s.entry)}`, rx, ye, alpha(css('--tv-text'), 0.88), 'right');
+        tag(`وقف ${fmtP(s.res && s.res.kind === 'open' ? s.res.stopNow : s.stop)} (−1R)`, rx, ys + (ys > ye ? 10 : -10), alpha(dn, 0.92), 'right');
+        tag(`هدف 1 ${fmtP(s.t1)} (+${rr.toFixed(1)}R)`, rx, y1 + (y1 > ye ? 10 : -10), alpha(up, 0.92), 'right');
+        if (y2 != null && y2 > 8 && y2 < paneH - 8) tag(`هدف 2 ${fmtP(s.t2)} (+${(Math.abs(s.t2 - s.entry) / s.risk).toFixed(1)}R)`, rx, y2, alpha(up, 0.72), 'right');
+        if (za != null) { ctx2.font = Fs; ctx2.fillStyle = alpha(amber, 1); ctx2.textAlign = 'left'; ctx2.textBaseline = 'bottom'; ctx2.fillText('منطقة الدخول', x0 + 3, Math.min(za, zb) - 2); }
+      }
+    }
+    // levels the scanner is waiting for (next setups)
+    const usedY = [];
+    if (live) return;
+    if (lay('pend') && SIG.pend) for (const o of SIG.pend.list.slice(0, 3)) {
+      const yy = y(o.p); if (yy == null || yy < 10 || yy > paneH - 10) continue;
+      if (usedY.some(v => Math.abs(v - yy) < 14)) continue; usedY.push(yy);
+      const xs = x(c.n - 1); if (xs == null) continue;
+      ctx2.strokeStyle = alpha(o.dir > 0 ? up : dn, 0.75); ctx2.setLineDash([2, 3]); ctx2.lineWidth = 1;
+      ctx2.beginPath(); ctx2.moveTo(xs, yy); ctx2.lineTo(paneW, yy); ctx2.stroke(); ctx2.setLineDash([]);
+      ctx2.font = Fs; ctx2.fillStyle = alpha(o.dir > 0 ? up : dn, 1); ctx2.textAlign = 'left'; ctx2.textBaseline = 'bottom';
+      ctx2.fillText(`${o.dir > 0 ? 'شراء محتمل' : 'بيع محتمل'} ${fmtP(o.p)}`, xs + 8, yy - 2);
+    }
+  }
   function drawPro(ctx2, x, y, paneW, paneH) {
     const c = CTX;
     // sessions strip (intraday)
@@ -1200,7 +1273,7 @@
 
   /* ================= LIVE DATA (GannData providers) ================= */
   const GD = window.GannData;
-  const TF_N = { '15min': '15 دقيقة', '1h': 'ساعة', '4h': '4 ساعات', '1day': 'يومي', '1week': 'أسبوعي' };
+  const TF_N = { '3min': '3 دقائق', '5min': '5 دقائق', '30min': '30 دقيقة', '15min': '15 دقيقة', '1h': 'ساعة', '4h': '4 ساعات', '1day': 'يومي', '1week': 'أسبوعي' };
   const LIVE = { env: { mcp: null }, feed: null, at: null, meta: null, tickTimer: 0, lastRefresh: 0 };
   const clock = t => new Date(t).toLocaleTimeString('ar-EG-u-nu-latn', { hour: '2-digit', minute: '2-digit', second: '2-digit' });
   const digitsFor = p => p >= 1000 ? 2 : p >= 100 ? 2 : p >= 10 ? 3 : p >= 1 ? 5 : 6;
@@ -1247,8 +1320,19 @@
   }
   /* every tick: price, candle and countdown update immediately (no re-analysis);
      the full Gann analysis reruns on a new candle at once, otherwise at most every 5 seconds */
+  let rafPending = false, rafNew = false;
   function liveTick(newBar) {
+    rafNew = rafNew || newBar;
+    if (rafPending) return;
+    rafPending = true;
+    requestAnimationFrame(() => { rafPending = false; const nb = rafNew; rafNew = false; paintTick(nb); });
+  }
+  let lastPx = null;
+  function paintTick(newBar) {
     const b = BARS[BARS.length - 1];
+    const el = $('#qPx');
+    if (lastPx != null && b.c !== lastPx) { el.classList.remove('tick-up', 'tick-dn'); void el.offsetWidth; el.classList.add(b.c > lastPx ? 'tick-up' : 'tick-dn'); }
+    lastPx = b.c;
     $('#qPx').textContent = fmtP(b.c);
     if (CTX && CHT.candle && !newBar) {
       try {

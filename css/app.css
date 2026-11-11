@@ -356,3 +356,10 @@ textarea{min-height:200px;font-family:var(--f-num);font-size:.8rem;direction:ltr
 .chart-card.tv .ohlc i{font-style:normal;margin-left:2px;margin-right:6px}
 .tv-tool.confirm{color:var(--tv-down)}
 .sig-now.prov{border-style:dashed;opacity:.92}
+
+/* price flash on every tick */
+@keyframes flashUp{from{color:var(--tv-up)}to{color:inherit}}
+@keyframes flashDn{from{color:var(--tv-down)}to{color:inherit}}
+#qPx.tick-up{animation:flashUp .6s ease-out}
+#qPx.tick-dn{animation:flashDn .6s ease-out}
+@media (prefers-reduced-motion: reduce){#qPx.tick-up,#qPx.tick-dn{animation:none}}
