@@ -8,6 +8,10 @@ test('routing: crypto goes to Binance, everything else to Twelve Data', () => {
   assert.equal(D.route('ethusdt').id, 'ETHUSDT');
   assert.equal(D.route('SOL-USDC').id, 'SOLUSDC');
   assert.equal(D.route('XAU/USD').provider, 'twelve');
+  assert.equal(D.route('XAU/USD').live, 'xauusdt');
+  assert.equal(D.route('XAUUSD').id, 'XAU/USD');
+  assert.equal(D.route('XAU/USD').session, true);
+  assert.equal(D.route('AAPL').session, false);
   assert.equal(D.route('EUR/USD').provider, 'twelve');
   assert.equal(D.route('AAPL').provider, 'twelve');
   assert.equal(D.route('XAU/USD', true).provider, 'claude');

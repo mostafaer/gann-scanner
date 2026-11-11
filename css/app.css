@@ -355,3 +355,4 @@ textarea{min-height:200px;font-family:var(--f-num);font-size:.8rem;direction:ltr
 .tv-u{color:var(--tv-up);font-style:normal}.tv-d{color:var(--tv-down);font-style:normal}
 .chart-card.tv .ohlc i{font-style:normal;margin-left:2px;margin-right:6px}
 .tv-tool.confirm{color:var(--tv-down)}
+.sig-now.prov{border-style:dashed;opacity:.92}

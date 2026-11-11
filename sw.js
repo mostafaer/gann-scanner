@@ -1,8 +1,8 @@
 /* Offline app shell. Market data (Binance, Twelve Data) always goes to the network. */
-const VERSION = 'gann-v1.3.0';
+const VERSION = 'gann-v1.4.0';
 const SHELL = [
   './', 'index.html', 'css/app.css', 'manifest.webmanifest',
-  'js/core/engine.js', 'js/core/scanner.js', 'js/data/providers.js', 'js/data/sample-xau.js', 'js/app.js', 'js/pwa.js',
+  'js/core/engine.js', 'js/core/scanner.js', 'js/data/session.js', 'js/data/providers.js', 'js/data/sample-xau.js', 'js/app.js', 'js/pwa.js',
   'vendor/astronomy-engine-2.1.19.min.js', 'vendor/lightweight-charts-4.2.3.standalone.production.js',
   'icons/icon.svg', 'icons/icon-192.png', 'icons/icon-512.png',
 ];

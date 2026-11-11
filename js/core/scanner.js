@@ -50,7 +50,8 @@
     diffs.sort((a, b) => a - b);
     const step = Math.max(60e3, diffs[diffs.length >> 1] || DAY), daily = step >= DAY * 0.9;
     const stepF = daily ? DAY : step;
-    const extendTo = idx => { while (T.length <= idx) { let t = T[T.length - 1] + stepF; if (!weekend) while ([0, 6].includes(new Date(t).getUTCDay())) t += daily ? DAY : step; T.push(t); } };
+    const offHours = t => { const d = new Date(t), wd = d.getUTCDay(), h = d.getUTCHours(); return daily ? (wd === 0 || wd === 6) : (wd === 6 || (wd === 0 && h < 22) || (wd === 5 && h >= 22)); };
+    const extendTo = idx => { while (T.length <= idx) { let t = T[T.length - 1] + stepF; if (!weekend) while (offHours(t)) t += daily ? DAY : step; T.push(t); } };
     let futN = 0; { const end = last.t + o.horizon * DAY; while (T[T.length - 1] < end && futN < 800) { extendTo(T.length); futN++; } }
     const ctx = { bars, n, last, piv, main, prevOpp, hi, lo, u, sqk, pf, T, extendTo, weekend, o, futN, step, daily };
     ctx.anchors = o.anchorMode === 'all' ? piv.filter(p => p.i <= main.i).slice(-8) : [main];

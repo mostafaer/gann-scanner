@@ -18,6 +18,15 @@
   const BN_REST = 'https://data-api.binance.vision/api/v3/klines';
   const BN_WS = 'wss://data-stream.binance.vision/ws/';
   const TD_REST = 'https://api.twelvedata.com';
+  const BNF_WS = 'wss://fstream.binance.com/ws/';
+  const SES = root.GannSession;
+  // metals: history from Twelve Data (spot), live from Binance's 1-second gold/silver index (keyless, no quota)
+  const METALS = { 'XAU/USD': 'xauusdt', 'XAG/USD': 'xagusdt', 'XAUUSD': 'xauusdt', 'XAGUSD': 'xagusdt' };
+  const FOREX = /^[A-Z]{3}\/[A-Z]{3}$/;
+  /* Twelve Data free plan: 800 credits/day. Count them so a page left open all day never runs out */
+  const BUDGET = 800, CREDIT_KEY = 'gann-scanner.tdcredits';
+  function credits() { try { const v = JSON.parse(localStorage.getItem(CREDIT_KEY) || '{}'), d = new Date().toISOString().slice(0, 10); return v.d === d ? v.n : 0; } catch (e) { return 0; } }
+  function spend(n) { try { const d = new Date().toISOString().slice(0, 10); localStorage.setItem(CREDIT_KEY, JSON.stringify({ d, n: credits() + n })); } catch (e) { } }
 
   function getKey() { try { return localStorage.getItem(KEY_STORE) || ''; } catch (e) { return ''; } }
   function setKey(k) { try { if (k) localStorage.setItem(KEY_STORE, k.trim()); else localStorage.removeItem(KEY_STORE); } catch (e) { } }
@@ -34,8 +43,13 @@
       const q = m[2] === 'USD' ? 'USDT' : m[2];
       return { provider: 'binance', id: m[1] + q, label: `${m[1]}/${q} · Binance`, note: m[2] === 'USD' ? 'سعر مقابل USDT' : '' };
     }
-    return { provider: 'twelve', id: s, label: `${s} · Twelve Data` };
+    const metal = METALS[s];
+    const id = metal ? (s.includes('/') ? s : s.slice(0, 3) + '/' + s.slice(3)) : s;
+    return { provider: 'twelve', id, label: `${id} · Twelve Data`, session: !!metal || FOREX.test(id), live: metal || null };
   }
+  /* when the candle that started at t closes, and whether the market is open (metals/forex sessions) */
+  function barClose(t, tf, r) { return SES.closeOf(t, tf, !!(r && r.session)); }
+  function marketOpen(r, t) { return !(r && r.session) || SES.isOpen(t == null ? Date.now() : t); }
 
   class DataError extends Error {
     constructor(code, message, extra) { super(message); this.code = code; Object.assign(this, extra || {}); }
@@ -87,6 +101,7 @@
     if (!key) throw new DataError('nokey', 'أضف مفتاح Twelve Data المجاني من الإعدادات لعرض الذهب والعملات والأسهم.');
     const q = new URLSearchParams(Object.assign({}, params, { apikey: key }));
     let r;
+    spend(1);
     try { r = await fetch(`${TD_REST}/${path}?${q}`, { cache: 'no-store' }); } catch (e) { throw new DataError('network', 'تعذّر الاتصال بـ Twelve Data. تحقق من الإنترنت.', { retryable: true }); }
     let j = null; try { j = await r.json(); } catch (e) { }
     if (!r.ok || (j && j.status === 'error')) throw tdError(j, r.status);
@@ -101,11 +116,47 @@
     }
     return [...map.values()].sort((a, b) => a.t - b.t);
   }
-  async function tdBars(id, tf, size) {
+  async function tdBars(id, tf, size, r) {
+    if (r && r.session && (tf === '4h' || tf === '1day' || tf === '1week')) return tdSessionBars(id, tf, r);
     const j = await tdGet('time_series', { symbol: id, interval: TF[tf].td, outputsize: String(size || 1000), timezone: 'UTC', order: 'ASC' });
     const bars = tdValuesToBars(j.values || []);
     if (bars.length < 40) throw new DataError('short', `بيانات ${id} قليلة (${bars.length} شمعة).`);
     return { bars, meta: { provider: 'twelve', decimals: decimalsOf((j.values || []).slice(-50).map(v => v.close)), exchange: j.meta && j.meta.exchange, type: j.meta && j.meta.type } };
+  }
+  /* TradingView-aligned 4h / daily / weekly candles for metals and forex, built from 1h (or daily) bars */
+  async function tdSessionBars(id, tf, r) {
+    let src;
+    if (tf === '1week') {
+      const j = await tdGet('time_series', { symbol: id, interval: '1day', outputsize: '1500', timezone: 'UTC', order: 'ASC' });
+      src = tdValuesToBars(j.values || []).map(b => Object.assign(b, { t: b.t + 23 * 36e5 })); // a UTC daily bar ≈ the session that ends that day
+    } else {
+      const j1 = await tdGet('time_series', { symbol: id, interval: '1h', outputsize: '5000', timezone: 'UTC', order: 'ASC' });
+      src = tdValuesToBars(j1.values || []);
+      if (tf === '1day' && src.length) { // one more page for a longer daily history
+        try {
+          const end = new Date(src[0].t - 36e5).toISOString().slice(0, 19).replace('T', ' ');
+          const j2 = await tdGet('time_series', { symbol: id, interval: '1h', outputsize: '5000', timezone: 'UTC', order: 'ASC', end_date: end });
+          src = tdValuesToBars([...(j2.values || []), ...(j1.values || [])]);
+        } catch (e) { }
+      }
+    }
+    const bars = SES.aggregate(src, tf, true);
+    if (bars.length < 40) throw new DataError('short', `بيانات ${id} قليلة (${bars.length} شمعة).`);
+    return { bars, meta: { provider: 'twelve', session: true, decimals: 2, built: tf === '1week' ? '1day' : '1h' } };
+  }
+  /* Binance futures index price (gold/silver spot index aggregated from several vendors, every second) */
+  function indexStream(pair, onPrice, onState) {
+    let ws = null, stopped = false, tries = 0, timer = null, alive = 0;
+    const open = () => {
+      if (stopped) return;
+      try { ws = new WebSocket(`${BNF_WS}${pair}@markPrice@1s`); } catch (e) { onState('fail'); return; }
+      ws.onopen = () => { tries = 0; onState('open'); };
+      ws.onmessage = ev => { try { const m = JSON.parse(ev.data); const i = +m.i; if (i > 0) { alive = Date.now(); onPrice(i, m.E || Date.now()); } } catch (e) { } };
+      ws.onclose = () => { if (stopped) return; onState(tries > 3 ? 'fail' : 'closed'); const wait = Math.min(30e3, 1000 * Math.pow(2, tries++)) + Math.random() * 500; timer = setTimeout(open, wait); };
+      ws.onerror = () => { try { ws.close(); } catch (e) { } };
+    };
+    open();
+    return { stop() { stopped = true; clearTimeout(timer); if (ws) try { ws.close(); } catch (e) { } }, lastAt: () => alive };
   }
   async function tdQuote(id) {
     const j = await tdGet('quote', { symbol: id, timezone: 'UTC' });
@@ -148,7 +199,7 @@
     const r = route(sym, !!(env && env.mcp));
     if (r.provider === 'binance') return Object.assign(await bnBars(r.id, tf, size), { route: r });
     if (r.provider === 'claude') return Object.assign(await claudeBars(env.mcp, r.id, tf, size), { route: r });
-    return Object.assign(await tdBars(r.id, tf, size), { route: r });
+    return Object.assign(await tdBars(r.id, tf, size, r), { route: r });
   }
 
   /* live feed: history first, then ticks. Callbacks:
@@ -156,17 +207,23 @@
   function createFeed(opts) {
     const { sym, tf, env, onBars, onTick, onStatus } = opts;
     const r = route(sym, !!(env && env.mcp));
-    let stopped = false, stopWs = null, timers = [], last = null, quoteFail = 0;
+    let stopped = false, stopWs = null, idx = null, timers = [], last = null, quoteFail = 0, offset = 0, calib = true, histAt = 0, streamOk = false;
     const later = (fn, ms) => { const id = setTimeout(() => { if (!stopped) fn(); }, ms); timers.push(id); };
     const status = (kind, text, action) => { if (!stopped) onStatus({ kind, text, action, route: r }); };
     const hidden = () => typeof document !== 'undefined' && document.hidden;
+    const hhmm = t => new Date(t).toLocaleTimeString('ar-EG-u-nu-latn', { hour: '2-digit', minute: '2-digit' });
+    const lowCredits = () => r.provider === 'twelve' && credits() >= BUDGET - 40;
+    const closedText = () => `السوق مغلق · يفتح ${new Date(SES.nextOpen(Date.now())).toLocaleString('ar-EG-u-nu-latn', { weekday: 'long', hour: '2-digit', minute: '2-digit' })}`;
 
     async function loadHistory(reload) {
       try {
-        const res = r.provider === 'binance' ? await bnBars(r.id, tf, 1000) : r.provider === 'claude' ? await claudeBars(env.mcp, r.id, tf, 1000) : await tdBars(r.id, tf, 1000);
+        const res = r.provider === 'binance' ? await bnBars(r.id, tf, 1000) : r.provider === 'claude' ? await claudeBars(env.mcp, r.id, tf, 1000) : await tdBars(r.id, tf, 1000, r);
         if (stopped) return;
-        last = res.bars[res.bars.length - 1];
-        onBars(res.bars, Object.assign(res.meta, { route: r }), reload);
+        // keep a live candle that is newer than the history (it came from the stream)
+        if (reload && last && res.bars.length && last.t > res.bars[res.bars.length - 1].t) res.bars.push(Object.assign({}, last));
+        else if (reload && last && res.bars.length && last.t === res.bars[res.bars.length - 1].t && streamOk) Object.assign(res.bars[res.bars.length - 1], { h: Math.max(res.bars[res.bars.length - 1].h, last.h), l: Math.min(res.bars[res.bars.length - 1].l, last.l), c: last.c });
+        last = res.bars[res.bars.length - 1]; histAt = Date.now(); calib = true;
+        onBars(res.bars, Object.assign(res.meta, { route: r, credits: credits() }), reload);
         return true;
       } catch (e) {
         if (stopped) return;
@@ -176,6 +233,15 @@
         return false;
       }
     }
+    /* one live price → update or open the current candle */
+    function tick(price, at) {
+      if (!last || !(price > 0)) return;
+      const k = SES.bucket(at, tf, !!r.session);
+      if (k > last.t) { last = { t: k, o: price, h: price, l: price, c: price, isNew: true }; }
+      else if (k === last.t) { last = Object.assign({}, last, { h: Math.max(last.h, price), l: Math.min(last.l, price), c: price, isNew: false }); }
+      else return;
+      onTick(last);
+    }
 
     (async () => {
       status('load', `جارٍ جلب ${r.label}…`);
@@ -184,41 +250,63 @@
       if (r.provider === 'binance') {
         stopWs = bnStream(r.id, tf, k => {
           if (stopped) return;
-          onTick(k); last = k;
+          onTick(k); last = k; streamOk = true;
           status('on', `لحظي · ${r.label}`);
         }, st => status(st === 'open' ? 'on' : 'warn', st === 'open' ? `لحظي · ${r.label}` : 'انقطع البث اللحظي — إعادة الاتصال…'));
-        // re-sync history every hour to catch any missed candles
         const resync = () => { loadHistory(true); later(resync, 36e5); }; later(resync, 36e5);
-      } else {
-        status('on', `مباشر · ${r.label} · تحديث كل ${Math.round(TF[tf].poll / 6e4)} د`);
-        const pollSeries = async () => { if (!hidden()) await loadHistory(true); later(pollSeries, TF[tf].poll); };
-        later(pollSeries, TF[tf].poll);
-        if (r.provider === 'twelve') {
-          const pollQuote = async () => {
-            if (!hidden() && last) {
-              try {
-                const q = await tdQuote(r.id); quoteFail = 0;
-                if (stopped || !(q.c > 0)) return;
-                const daily = TF[tf].ms >= 864e5;
-                if (daily && TF[tf].ms === 864e5 && isFinite(q.t) && q.t > last.t) { last = { t: q.t, o: q.o, h: q.h, l: q.l, c: q.c }; onTick(Object.assign({}, last, { isNew: true })); }
-                else if (daily && TF[tf].ms === 864e5 && q.t === last.t) { last = Object.assign({}, last, { o: q.o, h: q.h, l: q.l, c: q.c }); onTick(last); }
-                else { last = Object.assign({}, last, { c: q.c, h: Math.max(last.h, q.c), l: Math.min(last.l, q.c) }); onTick(last); }
-                status('on', `مباشر · ${r.label} · آخر سعر ${new Date().toLocaleTimeString('ar-EG-u-nu-latn', { hour: '2-digit', minute: '2-digit' })}`);
-              } catch (e) { quoteFail++; if (e.code === 'auth' || e.code === 'nokey') { status('err', e.message); return; } }
-            }
-            later(pollQuote, quoteFail ? 120e3 : 60e3);
-          };
-          later(pollQuote, 60e3);
-        }
+        return;
       }
+      if (r.provider === 'twelve' && r.live) {
+        // real time: Binance gold/silver index every second, aligned to Twelve Data spot with a small offset
+        idx = indexStream(r.live, (p, at) => {
+          if (stopped) return;
+          if (!marketOpen(r, at)) { status('warn', closedText()); return; }
+          if (calib && last && Date.now() - histAt < 10 * 6e4) { const o = last.c - p; offset = Math.abs(o) / p < 0.005 ? o : 0; calib = false; }
+          streamOk = true;
+          tick(p + offset, at);
+          status('on', `لحظي كل ثانية · ${r.id} · مؤشر Binance مُعايَر على Twelve Data`);
+        }, st => {
+          if (st === 'open') return;
+          if (st === 'fail') { streamOk = false; status('warn', 'البث اللحظي غير متاح من شبكتك — التحديث كل دقيقة من Twelve Data'); startQuotePoll(); }
+          else status('warn', 'انقطع البث اللحظي — إعادة الاتصال…');
+        });
+        // official candles from Twelve Data every 15 minutes (≈100 credits/day), only while the market is open
+        const resync = async () => { if (!hidden() && marketOpen(r) && !lowCredits()) await loadHistory(true); later(resync, 15 * 6e4); };
+        later(resync, 15 * 6e4);
+        later(() => { if (!streamOk) { status('warn', 'البث اللحظي غير متاح — التحديث كل دقيقة من Twelve Data'); startQuotePoll(); } }, 12e3);
+        if (!marketOpen(r)) status('warn', closedText());
+        return;
+      }
+      status('on', `مباشر · ${r.label} · تحديث كل ${Math.round(TF[tf].poll / 6e4)} د`);
+      const pollSeries = async () => { if (!hidden() && marketOpen(r) && !lowCredits()) await loadHistory(true); later(pollSeries, TF[tf].poll); };
+      later(pollSeries, TF[tf].poll);
+      if (r.provider === 'twelve') startQuotePoll();
     })();
+
+    let quotePolling = false;
+    function startQuotePoll() {
+      if (quotePolling || r.provider !== 'twelve') return; quotePolling = true;
+      const pollQuote = async () => {
+        if (!hidden() && last && marketOpen(r) && !lowCredits() && !streamOk) {
+          try {
+            const q = await tdQuote(r.id); quoteFail = 0;
+            if (stopped || !(q.c > 0)) return;
+            tick(q.c, Date.now());
+            status('on', `مباشر · ${r.label} · آخر سعر ${hhmm(Date.now())}`);
+          } catch (e) { quoteFail++; if (e.code === 'auth' || e.code === 'nokey') { status('err', e.message); return; } }
+        } else if (lowCredits()) status('warn', `اقترب رصيد Twelve Data اليومي من النفاد (${credits()}/${BUDGET}) — توقف التحديث حتى منتصف الليل UTC`);
+        else if (!marketOpen(r)) status('warn', closedText());
+        later(pollQuote, quoteFail ? 120e3 : 60e3);
+      };
+      later(pollQuote, 1000);
+    }
 
     return {
       route: r,
-      stop() { stopped = true; timers.forEach(clearTimeout); timers = []; if (stopWs) stopWs(); },
+      stop() { stopped = true; timers.forEach(clearTimeout); timers = []; if (stopWs) stopWs(); if (idx) idx.stop(); },
       refresh() { return loadHistory(true); },
     };
   }
 
-  root.GannData = { TF, route, fetchBars, createFeed, getKey, setKey, decimalsOf, DataError, _tdValuesToBars: tdValuesToBars };
+  root.GannData = { TF, route, fetchBars, createFeed, barClose, marketOpen, credits, BUDGET, getKey, setKey, decimalsOf, DataError, _tdValuesToBars: tdValuesToBars };
 })(typeof window !== 'undefined' ? window : globalThis);

@@ -357,7 +357,7 @@
   }
 
   /* ---------- data ---------- */
-  function renderData() { $('#symName').value = S.sym; $('#dataSub').textContent = `${BARS.length} شمعة · ${fd(BARS[0].t)} ← ${fd(BARS[BARS.length - 1].t)} · ${S.source === 'live' ? 'Twelve Data مباشر' : S.source === 'csv' ? 'ملف مرفوع' : 'بيانات الذهب المرفقة'}`; }
+  function renderData() { $('#symName').value = S.sym; $('#dataSub').textContent = `${BARS.length} شمعة · ${fd(BARS[0].t)} ← ${fd(BARS[BARS.length - 1].t)} · ${S.source === 'live' ? 'Twelve Data مباشر' : S.source === 'csv' ? 'ملف مرفوع' : 'بيانات الذهب المرفقة'}${GD.credits ? ` · رصيد Twelve Data اليوم ${GD.credits()}/${GD.BUDGET}` : ''}`; }
   function setData(txt, isUser) {
     const r = G.parseCSV(txt);
     if (r.error) { toast(r.error); return false; }
@@ -424,6 +424,7 @@
       handleScroll: { mouseWheel: true, pressedMouseMove: true, horzTouchDrag: true, vertTouchDrag: false },
     }, chartTheme()));
     makeMain();
+    CHT.future = CHT.chart.addLineSeries({ lastValueVisible: false, priceLineVisible: false, crosshairMarkerVisible: false, color: 'rgba(0,0,0,0)', autoscaleInfoProvider: () => null });
     CHT.hist = CHT.chart.addHistogramSeries({ priceScaleId: 'tc', priceLineVisible: false, lastValueVisible: false, base: 0 });
     CHT.chart.priceScale('tc').applyOptions({ scaleMargins: { top: 0.86, bottom: 0 }, visible: false });
     CHT.vol = CHT.chart.addHistogramSeries({ priceScaleId: 'vol', priceLineVisible: false, lastValueVisible: false, priceFormat: { type: 'volume' } });
@@ -514,8 +515,9 @@
     const range = CHT.chart.timeScale().getVisibleLogicalRange();
     const data = mainData(c);
     CHT.chart.applyOptions({ watermark: chartTheme().watermark });
-    for (let i = c.n; i < N; i++) data.push({ time: sec(c.T[i]) });
     CHT.candle.setData(data);
+    const fut = []; for (let i = c.n; i < N; i++) fut.push({ time: sec(c.T[i]) });
+    CHT.future.setData(fut);
     CHT.chart.applyOptions({ timeScale: { timeVisible: !c.daily, secondsVisible: false } });
     clearOverlays();
     const ref = c.last.c, lo = Math.max(c.lo * 0.97, ref * 0.85), hi = Math.min(c.hi * 1.03, ref * 1.15);
@@ -578,7 +580,7 @@
     const gmin = { A: 3, B: 2, C: 1 }[S.so.minGrade] || 1;
     if (lay('sigs')) for (const s of SIG.list) {
       if ({ A: 3, B: 2, C: 1 }[s.grade] < gmin) continue;
-      mk.push({ time: sec(s.t), position: s.dir > 0 ? 'belowBar' : 'aboveBar', shape: s.dir > 0 ? 'arrowUp' : 'arrowDown', color: css(s.dir > 0 ? '--up' : '--down'), size: s.grade === 'A' ? 2 : 1.4, text: `${s.grade} ${{ dbl: s.dir > 0 ? 'DB' : 'DT', tpl: s.dir > 0 ? 'TB' : 'TT', ret: (s.ratio * 100).toFixed(0) + '%', brk: 'BO' }[s.setup]}` });
+      mk.push({ time: sec(s.t), position: s.dir > 0 ? 'belowBar' : 'aboveBar', shape: s.dir > 0 ? 'arrowUp' : 'arrowDown', color: alpha(css(s.dir > 0 ? '--up' : '--down'), s.provisional ? 0.45 : 1), size: s.grade === 'A' ? 2 : 1.4, text: `${s.grade} ${{ dbl: s.dir > 0 ? 'DB' : 'DT', tpl: s.dir > 0 ? 'TB' : 'TT', ret: (s.ratio * 100).toFixed(0) + '%', brk: 'BO' }[s.setup]}` });
     }
     mk.sort((a, b) => a.time - b.time);
     CHT.candle.setMarkers(mk);
@@ -857,7 +859,7 @@
   function checkAlerts() {
     if (!AL.on || S.source !== 'live' || !CTX || RP.on) return;
     const s = SIG.live;
-    if (s && !AL.seen.has(sigKey(s))) {
+    if (s && !s.provisional && !AL.seen.has(sigKey(s))) {
       AL.seen.add(sigKey(s)); beep('sig');
       const msg = `${s.dir > 0 ? 'شراء' : 'بيع'} ${s.grade} · ${S.sym} · ${setupName(s)} · دخول ${fmtP(s.entry)} وقف ${fmtP(s.stop)}`;
       toast('إشارة جديدة: ' + msg); document.title = '● ' + msg;
@@ -1044,12 +1046,27 @@
   /* candle countdown */
   function tickCountdown() {
     const el = document.getElementById('cd'); if (!el || !CTX || S.source !== 'live' || RP.on) { if (el) el.textContent = ''; return; }
-    const step = CTX.daily ? (S.tf === '1week' ? 7 * DAY : DAY) : CTX.step, left = CTX.last.t + step - Date.now();
-    if (left <= 0 || left > step) { el.textContent = ''; return; }
-    const s = Math.floor(left / 1000), hh = Math.floor(s / 3600), mm = Math.floor(s / 60) % 60, ss = s % 60;
-    el.textContent = `تغلق الشمعة بعد ${hh ? hh + ':' : ''}${String(mm).padStart(2, '0')}:${String(ss).padStart(2, '0')}`;
+    const left = barCloseAt() - Date.now();
+    if (!(left > 0) || left > 8 * DAY) { el.textContent = ''; return; }
+    el.textContent = 'تغلق الشمعة بعد ' + dur(left);
+    // early warning: a signal that will be confirmed if the candle closes like this
+    if (AL.on && SIG.live && SIG.live.provisional && left <= 5 * 6e4) {
+      const k = 'pre|' + sigKey(SIG.live);
+      if (!AL.seen.has(k)) {
+        AL.seen.add(k); beep('near');
+        const msg = `إشارة مبدئية: ${SIG.live.dir > 0 ? 'شراء' : 'بيع'} ${SIG.live.grade} · ${S.sym} · ${setupName(SIG.live)} · تتأكد إذا أغلقت الشمعة هنا بعد ${dur(left)}`;
+        toast(msg); $('#alertLog').insertAdjacentHTML('afterbegin', `<li><span class="num">${clock(Date.now())}</span> ${esc(msg)}</li>`);
+      }
+    }
   }
   setInterval(tickCountdown, 1000);
+  const dur = ms => { const s = Math.floor(ms / 1000), d = Math.floor(s / 86400), hh = Math.floor(s / 3600) % 24, mm = Math.floor(s / 60) % 60, ss = s % 60; return (d ? d + 'ي ' : '') + (hh || d ? hh + ':' : '') + String(mm).padStart(2, '0') + ':' + String(ss).padStart(2, '0'); };
+  function barCloseAt() {
+    if (!CTX) return 0;
+    const r = LIVE.meta && LIVE.meta.route;
+    if (r && GD.barClose) return GD.barClose(CTX.last.t, S.tf, r);
+    return CTX.last.t + (CTX.daily ? (S.tf === '1week' ? 7 * DAY : DAY) : CTX.step);
+  }
 
   /* ---------- replay ---------- */
   const RP = { on: false, full: null, i: 0, timer: 0, ghost: true, speed: 700 };
@@ -1132,6 +1149,8 @@
     SIG.list = SIG.all.filter(s => GR[s.grade] >= gmin && S.so['set' + (s.setup === 'tpl' ? 'Dbl' : s.setup[0].toUpperCase() + s.setup.slice(1))] !== false);
     const lastI = CTX.n - 1;
     SIG.live = SIG.list.filter(s => s.i >= lastI - 1).sort((a, b) => b.score - a.score)[0] || null;
+    const forming = S.source === 'live' && Date.now() < barCloseAt();
+    for (const s of SIG.list) s.provisional = forming && s.i === lastI;
     SIG.open = SIG.list.filter(s => s.res.kind === 'open');
     SIG.pend = SC.pendingSetups(CTX, so, r.swings);
     SIG.watch = [];
@@ -1157,7 +1176,7 @@
     const live = SIG.live || SIG.open[SIG.open.length - 1], box = $('#sigNow'), c = CTX;
     const statCard = (st, nm) => `<div class="st"><div class="k">${nm}</div><div class="v num ${st.exp > 0 ? 'side-s' : st.n ? 'side-r' : ''}">${st.n ? (st.exp >= 0 ? '+' : '') + st.exp.toFixed(2) + 'R' : '—'}</div><div class="s">${st.n} صفقة · ربح ${(st.win * 100).toFixed(0)}% · PF ${isFinite(st.pf) ? st.pf.toFixed(2) : '∞'}</div></div>`;
     const P = SIG.pend, trendTxt = P.trend > 0 ? 'صاعد' : P.trend < 0 ? 'هابط' : 'غير محدد';
-    if (live) { box.className = 'sig-now ' + (live.dir > 0 ? 'buy' : 'sell'); box.innerHTML = tradeCard(live, SIG.live ? 'إشارة جديدة:' : 'صفقة مفتوحة:'); }
+    if (live) { box.className = 'sig-now ' + (live.dir > 0 ? 'buy' : 'sell') + (live.provisional ? ' prov' : ''); box.innerHTML = tradeCard(live, live.provisional ? 'إشارة مبدئية (تتأكد عند إغلاق الشمعة):' : SIG.live ? 'إشارة جديدة:' : 'صفقة مفتوحة:'); }
     else {
       box.className = 'sig-now idle';
       box.innerHTML = `<div class="sig-h"><span class="pill ${P.trend > 0 ? 'up' : P.trend < 0 ? 'down' : 'nt'}">الاتجاه حسب جان: ${trendTxt}</span><b>لا توجد صفقة الآن · الماسح ينتظر أحد إعدادات جان</b></div>
@@ -1222,13 +1241,27 @@
         else if (k.t > last.t) BARS.push({ t: k.t, o: k.o, h: k.h, l: k.l, c: k.c });
         else return;
         LIVE.at = Date.now();
-        $('#qPx').textContent = fmtP(k.c);
-        // heavy re-analysis at most every 3 s; the header price updates on every tick
-        const wait = 3000 - (Date.now() - LIVE.lastRefresh);
-        clearTimeout(LIVE.tickTimer);
-        LIVE.tickTimer = setTimeout(() => { LIVE.lastRefresh = Date.now(); refresh(true); }, Math.max(0, wait));
+        liveTick(k.t > last.t || k.isNew);
       },
     });
+  }
+  /* every tick: price, candle and countdown update immediately (no re-analysis);
+     the full Gann analysis reruns on a new candle at once, otherwise at most every 5 seconds */
+  function liveTick(newBar) {
+    const b = BARS[BARS.length - 1];
+    $('#qPx').textContent = fmtP(b.c);
+    if (CTX && CHT.candle && !newBar) {
+      try {
+        const t = S.chartType || 'candles';
+        if (t === 'ha') { const d = mainData({ bars: BARS.slice(-3) }); CHT.candle.update(Object.assign(d[d.length - 1], { time: sec(b.t) })); }
+        else CHT.candle.update(t === 'line' || t === 'area' ? { time: sec(b.t), value: b.c } : { time: sec(b.t), open: b.o, high: b.h, low: b.l, close: b.c });
+        renderOHLC(CTX.n - 1);
+      } catch (e) { }
+    }
+    clearTimeout(LIVE.tickTimer);
+    if (newBar) { LIVE.lastRefresh = Date.now(); refresh(true); return; }
+    const wait = 5000 - (Date.now() - LIVE.lastRefresh);
+    LIVE.tickTimer = setTimeout(() => { LIVE.lastRefresh = Date.now(); refresh(true); }, Math.max(0, wait));
   }
   function openKeySettings() {
     $$('#tabs [role=tab]').forEach(x => x.setAttribute('aria-selected', x.dataset.t === 'data'));

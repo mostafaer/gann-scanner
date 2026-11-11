@@ -2,6 +2,7 @@
 globalThis.Astronomy = require('astronomy-engine');
 require('../js/core/engine.js');
 require('../js/core/scanner.js');
+require('../js/data/session.js');
 require('../js/data/providers.js');
 const fs = require('fs'), path = require('path');
 const sample = fs.readFileSync(path.join(__dirname, '../js/data/sample-xau.js'), 'utf8');
